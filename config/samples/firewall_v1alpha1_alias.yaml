@@ -1,0 +1,9 @@
+apiVersion: firewall.opnsense.io/v1alpha1
+kind: Alias
+metadata:
+  labels:
+    app.kubernetes.io/name: opnsense-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: alias-sample
+spec:
+  # TODO(user): Add fields here

@@ -1,0 +1,33 @@
+# This rule is not used by the project opnsense-operator itself.
+# It is provided to allow the cluster admin to help manage permissions for users.
+#
+# Grants permissions to create, update, and delete resources within the firewall.opnsense.io.
+# This role is intended for users who need to manage these resources
+# but should not control RBAC or manage permissions for others.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: opnsense-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: alias-editor-role
+rules:
+- apiGroups:
+  - firewall.opnsense.io
+  resources:
+  - aliases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - firewall.opnsense.io
+  resources:
+  - aliases/status
+  verbs:
+  - get

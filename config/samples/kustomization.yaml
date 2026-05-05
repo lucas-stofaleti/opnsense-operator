@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- firewall_v1alpha1_alias.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
