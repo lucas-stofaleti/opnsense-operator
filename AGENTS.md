@@ -63,6 +63,13 @@ Never write implementation code before a failing test exists. Never skip the
 - **Never assume how the API behaves.** Before writing a test or implementation
   for any OPNsense API endpoint, verify its real behaviour using curl against the
   local OPNsense VM.
+- Use `hack/opnsense-curl.sh` for these checks instead of hand-writing curl
+  commands each time. The script expects `OPNSENSE_BASE_URL`,
+  `OPNSENSE_API_KEY`, and `OPNSENSE_API_SECRET`. For self-signed TLS, set
+  `OPNSENSE_INSECURE=true`. If you have a trusted CA bundle, set
+  `OPNSENSE_CA_CERT` instead. The helper supports GET/POST/PUT/DELETE style
+  checks, inline JSON bodies, body files, stdin, custom headers, query strings,
+  and pass-through curl flags after `--`.
 - Check both the happy path and failure cases. OPNsense often returns HTTP 200
   with `{"result": "failed"}` instead of a 4xx status code — this matters for
   error handling.
@@ -74,9 +81,13 @@ Never write implementation code before a failing test exists. Never skip the
 Example approach before implementing a new method:
 ```bash
 # Verify the real response shape before writing the test
-curl -k -u "$OPNSENSE_KEY:$OPNSENSE_SECRET" \
-  https://192.168.56.101/api/firewall/alias/getAliasUUID/test
+hack/opnsense-curl.sh /api/firewall/alias/getAliasUUID/test
 # {"uuid":"c6b50d57-b441-4217-a2d1-b81313887fdc"}
+
+# Verify a POST endpoint with JSON
+hack/opnsense-curl.sh -X POST \
+  -d '{"alias":{"name":"test","type":"host","content":"192.0.2.10"}}' \
+  /api/firewall/alias/addItem
 ```
 
 ## Testing strategy
