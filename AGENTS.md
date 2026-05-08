@@ -112,6 +112,17 @@ This project uses three layers of tests. Understand which layer you are in.
 - Use envtest (a real Kubernetes API server, no mocks).
 - Run as part of `make test`.
 
+### Coverage expectations
+- Do not optimize for coverage percentage alone. Optimize for behavior coverage:
+  happy path, known failure paths, transport errors, unexpected response shapes,
+  not-found behavior, validation failures, and delete/update edge cases.
+- For any changed package, aim for at least 80% statement coverage.
+- For critical OPNsense client and controller reconciliation paths, aim for 90%+
+  coverage of the touched functions and branches.
+- Coverage percentage is a floor, not the goal. A change is not complete if
+  meaningful branches are still untested, even if the package-level percentage
+  looks acceptable.
+
 ## Edge cases
 
 Always think through these before implementing:
