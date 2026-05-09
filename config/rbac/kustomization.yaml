@@ -22,6 +22,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the opnsense-operator itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- opnsenseconnection_admin_role.yaml
+- opnsenseconnection_editor_role.yaml
+- opnsenseconnection_viewer_role.yaml
 - alias_admin_role.yaml
 - alias_editor_role.yaml
 - alias_viewer_role.yaml

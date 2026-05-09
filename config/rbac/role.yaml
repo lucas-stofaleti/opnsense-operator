@@ -5,9 +5,18 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - firewall.opnsense.io
   resources:
   - aliases
+  - opnsenseconnections
   verbs:
   - create
   - delete
@@ -20,12 +29,14 @@ rules:
   - firewall.opnsense.io
   resources:
   - aliases/finalizers
+  - opnsenseconnections/finalizers
   verbs:
   - update
 - apiGroups:
   - firewall.opnsense.io
   resources:
   - aliases/status
+  - opnsenseconnections/status
   verbs:
   - get
   - patch

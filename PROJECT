@@ -18,4 +18,12 @@ resources:
   kind: Alias
   path: github.com/lucas-stofaleti/opnsense-operator/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: opnsense.io
+  group: firewall
+  kind: OPNsenseConnection
+  path: github.com/lucas-stofaleti/opnsense-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"

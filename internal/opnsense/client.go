@@ -159,6 +159,22 @@ func (c *Client) DeleteAlias(ctx context.Context, uuid string) error {
 	return response.resultError("deleted")
 }
 
+func (c *Client) CheckConnectivity(ctx context.Context) error {
+	body, err := c.doJSON(ctx, http.MethodGet, "/api/core/system/status", nil)
+	if err != nil {
+		return err
+	}
+
+	// Verify the response is valid JSON. The content of the body reflects
+	// OPNsense system health, which is unrelated to API connectivity.
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		return fmt.Errorf("%w: connectivity check response is not valid JSON", ErrUnexpectedResponse)
+	}
+
+	return nil
+}
+
 func (c *Client) ReconfigureAliases(ctx context.Context) error {
 	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/alias/reconfigure", map[string]string{})
 	if err != nil {
