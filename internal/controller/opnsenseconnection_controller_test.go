@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"time"
@@ -310,6 +311,274 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 			secret := &corev1.Secret{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, secret); err == nil {
 				Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+			}
+		})
+
+		It("sets Ready=False with reason ConnectionFailed", func() {
+			_, err := reconcileConnection(connName)
+			Expect(err).To(HaveOccurred())
+
+			cond := readyCondition(connName)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal("ConnectionFailed"))
+		})
+	})
+
+	Context("When insecureSkipVerify is true and OPNsense uses self-signed TLS", func() {
+		const connName = "conn-tls-insecure"
+		const secretName = "opnsense-creds-tls-insecure"
+		const secretNS = "default"
+
+		var server *httptest.Server
+
+		BeforeEach(func() {
+			server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"metadata":{},"subsystems":{}}`))
+			}))
+
+			By("creating the credentials Secret")
+			secret := credentialsSecret(secretName, secretNS, "key", "secret")
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, &corev1.Secret{})
+			if errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			}
+
+			By("creating the OPNsenseConnection CR with insecureSkipVerify")
+			conn := &firewallv1alpha1.OPNsenseConnection{
+				ObjectMeta: metav1.ObjectMeta{Name: connName},
+				Spec: firewallv1alpha1.OPNsenseConnectionSpec{
+					URL: server.URL,
+					Credentials: firewallv1alpha1.CredentialsSpec{
+						SecretRef: firewallv1alpha1.SecretReference{Name: secretName, Namespace: secretNS},
+					},
+					TLS: &firewallv1alpha1.TLSSpec{InsecureSkipVerify: true},
+				},
+			}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: connName}, &firewallv1alpha1.OPNsenseConnection{})
+			if errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+			}
+		})
+
+		AfterEach(func() {
+			server.Close()
+			conn := &firewallv1alpha1.OPNsenseConnection{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: connName}, conn); err == nil {
+				Expect(k8sClient.Delete(ctx, conn)).To(Succeed())
+			}
+			secret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, secret); err == nil {
+				Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+			}
+		})
+
+		It("sets Ready=True by skipping TLS verification", func() {
+			result, err := reconcileConnection(connName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(1 * time.Minute))
+
+			cond := readyCondition(connName)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal("ConnectionVerified"))
+		})
+	})
+
+	Context("When a valid CA secret is provided for a TLS server", func() {
+		const connName = "conn-tls-ca"
+		const secretName = "opnsense-creds-tls-ca"
+		const caSecretName = "opnsense-ca"
+		const secretNS = "default"
+
+		var server *httptest.Server
+
+		BeforeEach(func() {
+			server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"metadata":{},"subsystems":{}}`))
+			}))
+
+			// Extract the server's self-signed certificate as PEM so we can trust it.
+			certPEM := pem.EncodeToMemory(&pem.Block{
+				Type:  "CERTIFICATE",
+				Bytes: server.TLS.Certificates[0].Certificate[0],
+			})
+
+			By("creating the CA Secret containing the server certificate")
+			caSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: caSecretName, Namespace: secretNS},
+				Data:       map[string][]byte{"ca.crt": certPEM},
+			}
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: caSecretName, Namespace: secretNS}, &corev1.Secret{})
+			if errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, caSecret)).To(Succeed())
+			}
+
+			By("creating the credentials Secret")
+			secret := credentialsSecret(secretName, secretNS, "key", "secret")
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, &corev1.Secret{})
+			if errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			}
+
+			By("creating the OPNsenseConnection CR with caSecretRef")
+			conn := &firewallv1alpha1.OPNsenseConnection{
+				ObjectMeta: metav1.ObjectMeta{Name: connName},
+				Spec: firewallv1alpha1.OPNsenseConnectionSpec{
+					URL: server.URL,
+					Credentials: firewallv1alpha1.CredentialsSpec{
+						SecretRef: firewallv1alpha1.SecretReference{Name: secretName, Namespace: secretNS},
+					},
+					TLS: &firewallv1alpha1.TLSSpec{
+						CASecretRef: &firewallv1alpha1.SecretReference{Name: caSecretName, Namespace: secretNS},
+					},
+				},
+			}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: connName}, &firewallv1alpha1.OPNsenseConnection{})
+			if errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+			}
+		})
+
+		AfterEach(func() {
+			server.Close()
+			conn := &firewallv1alpha1.OPNsenseConnection{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: connName}, conn); err == nil {
+				Expect(k8sClient.Delete(ctx, conn)).To(Succeed())
+			}
+			secret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, secret); err == nil {
+				Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+			}
+			caSecret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: caSecretName, Namespace: secretNS}, caSecret); err == nil {
+				Expect(k8sClient.Delete(ctx, caSecret)).To(Succeed())
+			}
+		})
+
+		It("sets Ready=True using the custom CA to verify TLS", func() {
+			result, err := reconcileConnection(connName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(1 * time.Minute))
+
+			cond := readyCondition(connName)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal("ConnectionVerified"))
+		})
+	})
+
+	Context("When the CA secret referenced in caSecretRef does not exist", func() {
+		const connName = "conn-tls-ca-missing"
+		const secretName = "opnsense-creds-tls-ca-missing"
+		const secretNS = "default"
+
+		BeforeEach(func() {
+			By("creating the credentials Secret")
+			secret := credentialsSecret(secretName, secretNS, "key", "secret")
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, &corev1.Secret{})
+			if errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			}
+
+			By("creating the OPNsenseConnection CR with a missing caSecretRef")
+			conn := &firewallv1alpha1.OPNsenseConnection{
+				ObjectMeta: metav1.ObjectMeta{Name: connName},
+				Spec: firewallv1alpha1.OPNsenseConnectionSpec{
+					URL: "https://irrelevant",
+					Credentials: firewallv1alpha1.CredentialsSpec{
+						SecretRef: firewallv1alpha1.SecretReference{Name: secretName, Namespace: secretNS},
+					},
+					TLS: &firewallv1alpha1.TLSSpec{
+						CASecretRef: &firewallv1alpha1.SecretReference{Name: "does-not-exist", Namespace: secretNS},
+					},
+				},
+			}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: connName}, &firewallv1alpha1.OPNsenseConnection{})
+			if errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+			}
+		})
+
+		AfterEach(func() {
+			conn := &firewallv1alpha1.OPNsenseConnection{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: connName}, conn); err == nil {
+				Expect(k8sClient.Delete(ctx, conn)).To(Succeed())
+			}
+			secret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, secret); err == nil {
+				Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+			}
+		})
+
+		It("sets Ready=False with reason ConnectionFailed", func() {
+			_, err := reconcileConnection(connName)
+			Expect(err).To(HaveOccurred())
+
+			cond := readyCondition(connName)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal("ConnectionFailed"))
+		})
+	})
+
+	Context("When the CA secret contains invalid PEM data", func() {
+		const connName = "conn-tls-ca-invalid"
+		const secretName = "opnsense-creds-tls-ca-invalid"
+		const caSecretName = "opnsense-ca-invalid"
+		const secretNS = "default"
+
+		BeforeEach(func() {
+			By("creating a CA Secret with garbage data")
+			caSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: caSecretName, Namespace: secretNS},
+				Data:       map[string][]byte{"ca.crt": []byte("not-valid-pem")},
+			}
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: caSecretName, Namespace: secretNS}, &corev1.Secret{})
+			if errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, caSecret)).To(Succeed())
+			}
+
+			By("creating the credentials Secret")
+			secret := credentialsSecret(secretName, secretNS, "key", "secret")
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, &corev1.Secret{})
+			if errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			}
+
+			By("creating the OPNsenseConnection CR referencing the invalid CA secret")
+			conn := &firewallv1alpha1.OPNsenseConnection{
+				ObjectMeta: metav1.ObjectMeta{Name: connName},
+				Spec: firewallv1alpha1.OPNsenseConnectionSpec{
+					URL: "https://irrelevant",
+					Credentials: firewallv1alpha1.CredentialsSpec{
+						SecretRef: firewallv1alpha1.SecretReference{Name: secretName, Namespace: secretNS},
+					},
+					TLS: &firewallv1alpha1.TLSSpec{
+						CASecretRef: &firewallv1alpha1.SecretReference{Name: caSecretName, Namespace: secretNS},
+					},
+				},
+			}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: connName}, &firewallv1alpha1.OPNsenseConnection{})
+			if errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+			}
+		})
+
+		AfterEach(func() {
+			conn := &firewallv1alpha1.OPNsenseConnection{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: connName}, conn); err == nil {
+				Expect(k8sClient.Delete(ctx, conn)).To(Succeed())
+			}
+			secret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, secret); err == nil {
+				Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+			}
+			caSecret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: caSecretName, Namespace: secretNS}, caSecret); err == nil {
+				Expect(k8sClient.Delete(ctx, caSecret)).To(Succeed())
 			}
 		})
 
