@@ -20,6 +20,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -142,9 +143,10 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 			}
 		})
 
-		It("sets Ready=True after successful reconciliation", func() {
-			_, err := reconcileConnection(connName)
+		It("sets Ready=True and requeues after 1 minute", func() {
+			result, err := reconcileConnection(connName)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(1 * time.Minute))
 
 			cond := readyCondition(connName)
 			Expect(cond).NotTo(BeNil())

@@ -6,13 +6,14 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: default
 spec:
-  url: https://opnsense.example.com
+  url: https://192.168.56.101
   credentials:
     secretRef:
       name: opnsense-api-credentials
-      namespace: opnsense-system
+      namespace: opnsense-operator-system
+  tls:
+    insecureSkipVerify: true   # dev only — disables TLS certificate verification
   # tls:
-  #   insecureSkipVerify: true   # dev only — disables TLS certificate verification
-  #   caSecretRef:               # production — custom CA bundle
+  #   caSecretRef:             # production — custom CA bundle
   #     name: opnsense-ca
-  #     namespace: opnsense-system
+  #     namespace: opnsense-operator-system

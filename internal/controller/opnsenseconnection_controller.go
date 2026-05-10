@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net/http"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -100,7 +101,7 @@ func (r *OPNsenseConnectionReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	log.Info("Connectivity check succeeded", "url", conn.Spec.URL)
-	return ctrl.Result{}, r.setReadyCondition(ctx, conn, metav1.ConditionTrue, "ConnectionVerified",
+	return ctrl.Result{RequeueAfter: 1 * time.Minute}, r.setReadyCondition(ctx, conn, metav1.ConditionTrue, "ConnectionVerified",
 		fmt.Sprintf("Successfully connected to OPNsense at %s", conn.Spec.URL))
 }
 
