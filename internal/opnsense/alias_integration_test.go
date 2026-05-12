@@ -68,6 +68,14 @@ func TestAliasLifecycleIntegration(t *testing.T) {
 		t.Fatalf("expected looked up uuid %q to match created uuid %q", lookedUpUUID, uuid)
 	}
 
+	gotAlias, err := client.GetAlias(ctx, uuid)
+	if err != nil {
+		t.Fatalf("GetAlias returned error: %v", err)
+	}
+	if gotAlias != created {
+		t.Fatalf("expected GetAlias to return %#v, got %#v", created, gotAlias)
+	}
+
 	_, err = client.CreateAlias(ctx, created)
 	if err == nil {
 		t.Fatal("expected duplicate alias name to return a validation error")

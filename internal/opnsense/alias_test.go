@@ -93,6 +93,110 @@ func TestGetAliasUUIDByNameReturnsUnexpectedResponseWhenUUIDMissing(t *testing.T
 	}
 }
 
+func TestGetAlias(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh '/api/firewall/alias/export?ids=07b5c0a7-6c91-4947-99eb-f3f0490504e0'
+	// Real response:
+	//   {"aliases":{"alias":{"07b5c0a7-6c91-4947-99eb-f3f0490504e0":{"enabled":"1","name":"c131744","type":"host","content":"198.51.100.10\n198.51.100.11","description":"export probe"}}}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET request, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/firewall/alias/export" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("ids"); got != "07b5c0a7-6c91-4947-99eb-f3f0490504e0" {
+			t.Fatalf("expected ids query to match, got %q", got)
+		}
+
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"aliases": map[string]any{
+				"alias": map[string]any{
+					"07b5c0a7-6c91-4947-99eb-f3f0490504e0": map[string]string{
+						"enabled":     "1",
+						"name":        "c131744",
+						"type":        "host",
+						"content":     "198.51.100.10\n198.51.100.11",
+						"description": "export probe",
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "key", "secret", server.Client())
+
+	alias, err := client.GetAlias(context.Background(), "07b5c0a7-6c91-4947-99eb-f3f0490504e0")
+	if err != nil {
+		t.Fatalf("GetAlias returned error: %v", err)
+	}
+
+	expected := Alias{
+		Enabled:     true,
+		Name:        "c131744",
+		Type:        "host",
+		Content:     "198.51.100.10\n198.51.100.11",
+		Description: "export probe",
+	}
+	if alias != expected {
+		t.Fatalf("expected alias %#v, got %#v", expected, alias)
+	}
+}
+
+func TestGetAliasReturnsNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh '/api/firewall/alias/export?ids=11111111-1111-1111-1111-111111111111'
+	// Real response:
+	//   {"aliases":{"alias":[]}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"aliases": map[string]any{
+				"alias": []any{},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "key", "secret", server.Client())
+
+	_, err := client.GetAlias(context.Background(), "11111111-1111-1111-1111-111111111111")
+	if !errors.Is(err, ErrAliasNotFound) {
+		t.Fatalf("expected ErrAliasNotFound, got %v", err)
+	}
+}
+
+func TestGetAliasReturnsUnexpectedResponseWhenUUIDMissingFromExport(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"aliases": map[string]any{
+				"alias": map[string]any{
+					"22222222-2222-2222-2222-222222222222": map[string]string{
+						"enabled": "1",
+						"name":    "other",
+						"type":    "host",
+						"content": "198.51.100.10",
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "key", "secret", server.Client())
+
+	_, err := client.GetAlias(context.Background(), "11111111-1111-1111-1111-111111111111")
+	if !errors.Is(err, ErrUnexpectedResponse) {
+		t.Fatalf("expected ErrUnexpectedResponse, got %v", err)
+	}
+}
+
 func TestCreateAlias(t *testing.T) {
 	t.Parallel()
 

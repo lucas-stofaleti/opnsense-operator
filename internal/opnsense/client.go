@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -99,6 +100,74 @@ func (c *Client) GetAliasUUIDByName(ctx context.Context, name string) (string, e
 	}
 
 	return response.UUID, nil
+}
+
+func (c *Client) GetAlias(ctx context.Context, uuid string) (Alias, error) {
+	body, err := c.doJSON(ctx, http.MethodGet, "/api/firewall/alias/export?ids="+url.QueryEscape(uuid), nil)
+	if err != nil {
+		return Alias{}, err
+	}
+
+	var response struct {
+		Aliases struct {
+			Alias json.RawMessage `json:"alias"`
+		} `json:"aliases"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return Alias{}, fmt.Errorf("decode export alias response: %w", err)
+	}
+
+	aliasData := bytes.TrimSpace(response.Aliases.Alias)
+	if len(aliasData) == 0 {
+		return Alias{}, fmt.Errorf("%w: export alias response did not contain alias data", ErrUnexpectedResponse)
+	}
+
+	switch aliasData[0] {
+	case '[':
+		var aliases []any
+		if err := json.Unmarshal(aliasData, &aliases); err != nil {
+			return Alias{}, fmt.Errorf("decode exported alias array: %w", err)
+		}
+		if len(aliases) == 0 {
+			return Alias{}, ErrAliasNotFound
+		}
+		return Alias{}, fmt.Errorf("%w: export alias response returned an unexpected array", ErrUnexpectedResponse)
+	case '{':
+		var aliases map[string]struct {
+			Enabled     string `json:"enabled"`
+			Name        string `json:"name"`
+			Type        string `json:"type"`
+			Content     string `json:"content"`
+			Description string `json:"description"`
+		}
+		if err := json.Unmarshal(aliasData, &aliases); err != nil {
+			return Alias{}, fmt.Errorf("decode exported alias object: %w", err)
+		}
+		if len(aliases) == 0 {
+			return Alias{}, ErrAliasNotFound
+		}
+
+		exportedAlias, ok := aliases[uuid]
+		if !ok {
+			return Alias{}, fmt.Errorf("%w: export alias response did not contain requested uuid %q", ErrUnexpectedResponse, uuid)
+		}
+		if exportedAlias.Name == "" {
+			return Alias{}, fmt.Errorf("%w: exported alias did not contain a name", ErrUnexpectedResponse)
+		}
+		if exportedAlias.Type == "" {
+			return Alias{}, fmt.Errorf("%w: exported alias did not contain a type", ErrUnexpectedResponse)
+		}
+
+		return Alias{
+			Enabled:     exportedAlias.Enabled == "1",
+			Name:        exportedAlias.Name,
+			Type:        exportedAlias.Type,
+			Content:     exportedAlias.Content,
+			Description: exportedAlias.Description,
+		}, nil
+	default:
+		return Alias{}, fmt.Errorf("%w: export alias response had unexpected alias payload", ErrUnexpectedResponse)
+	}
 }
 
 func (c *Client) CreateAlias(ctx context.Context, alias Alias) (string, error) {
