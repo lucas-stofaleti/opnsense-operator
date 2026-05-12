@@ -6,4 +6,12 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: alias-sample
 spec:
-  # TODO(user): Add fields here
+  connectionRef:
+    name: example-connection
+  name: allow_dns
+  type: host
+  entries:
+    - 198.51.100.10
+    - 198.51.100.11
+  description: Example alias managed by the operator
+  enabled: true

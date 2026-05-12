@@ -51,7 +51,14 @@ var _ = Describe("Alias Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: firewallv1alpha1.AliasSpec{
+						ConnectionRef: firewallv1alpha1.OPNsenseConnectionReference{
+							Name: "primary",
+						},
+						Name:    "allow_dns",
+						Type:    "host",
+						Entries: []string{"198.51.100.10"},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

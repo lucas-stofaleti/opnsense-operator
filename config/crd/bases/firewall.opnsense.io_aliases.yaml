@@ -14,10 +14,23 @@ spec:
     singular: alias
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .spec.name
+      name: Alias
+      type: string
+    - jsonPath: .spec.connectionRef.name
+      name: Connection
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Alias is the Schema for the aliases API
+        description: Alias is the Schema for the aliases API.
         properties:
           apiVersion:
             description: |-
@@ -39,25 +52,52 @@ spec:
           spec:
             description: spec defines the desired state of Alias
             properties:
-              foo:
-                description: foo is an example field of Alias. Edit alias_types.go
-                  to remove/update
+              connectionRef:
+                description: connectionRef points to the OPNsenseConnection used to
+                  manage this alias.
+                properties:
+                  name:
+                    description: name is the name of the OPNsenseConnection resource.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              description:
+                description: description is an optional free-form description stored
+                  in OPNsense.
                 type: string
+              enabled:
+                default: true
+                description: enabled controls whether the alias is enabled in OPNsense.
+                type: boolean
+              entries:
+                description: |-
+                  entries are the alias contents as separate items.
+                  The controller joins them with newlines before sending them to OPNsense.
+                items:
+                  type: string
+                minItems: 1
+                type: array
+              name:
+                description: name is the alias name in OPNsense.
+                minLength: 1
+                type: string
+              type:
+                description: type is the OPNsense alias type, such as "host".
+                minLength: 1
+                type: string
+            required:
+            - connectionRef
+            - entries
+            - name
+            - type
             type: object
           status:
             description: status defines the observed state of Alias
             properties:
               conditions:
-                description: |-
-                  conditions represent the current state of the Alias resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                description: conditions represent the current state of the Alias resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -116,6 +156,14 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              observedGeneration:
+                description: observedGeneration records the most recent generation
+                  observed by the controller.
+                format: int64
+                type: integer
+              uuid:
+                description: uuid is the OPNsense identifier for the managed alias.
+                type: string
             type: object
         required:
         - spec

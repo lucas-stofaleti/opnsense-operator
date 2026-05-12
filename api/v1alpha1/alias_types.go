@@ -20,38 +20,57 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// OPNsenseConnectionReference identifies the cluster-scoped OPNsenseConnection used by a resource.
+type OPNsenseConnectionReference struct {
+	// name is the name of the OPNsenseConnection resource.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+}
 
-// AliasSpec defines the desired state of Alias
+// AliasSpec defines the desired state of Alias.
 type AliasSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// connectionRef points to the OPNsenseConnection used to manage this alias.
+	// +kubebuilder:validation:Required
+	ConnectionRef OPNsenseConnectionReference `json:"connectionRef"`
 
-	// foo is an example field of Alias. Edit alias_types.go to remove/update
+	// name is the alias name in OPNsense.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// type is the OPNsense alias type, such as "host".
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Type string `json:"type"`
+
+	// entries are the alias contents as separate items.
+	// The controller joins them with newlines before sending them to OPNsense.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	Entries []string `json:"entries"`
+
+	// description is an optional free-form description stored in OPNsense.
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	Description string `json:"description,omitempty"`
+
+	// enabled controls whether the alias is enabled in OPNsense.
+	// +kubebuilder:default=true
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // AliasStatus defines the observed state of Alias.
 type AliasStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// uuid is the OPNsense identifier for the managed alias.
+	// +optional
+	UUID string `json:"uuid,omitempty"`
 
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+	// observedGeneration records the most recent generation observed by the controller.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// conditions represent the current state of the Alias resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -60,8 +79,13 @@ type AliasStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Namespaced
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
+// +kubebuilder:printcolumn:name="Alias",type=string,JSONPath=".spec.name"
+// +kubebuilder:printcolumn:name="Connection",type=string,JSONPath=".spec.connectionRef.name"
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 
-// Alias is the Schema for the aliases API
+// Alias is the Schema for the aliases API.
 type Alias struct {
 	metav1.TypeMeta `json:",inline"`
 
