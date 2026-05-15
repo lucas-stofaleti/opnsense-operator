@@ -18,14 +18,18 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	firewallv1alpha1 "github.com/lucas-stofaleti/opnsense-operator/api/v1alpha1"
 )
+
+const aliasFinalizer = "firewall.opnsense.io/finalizer"
 
 // AliasReconciler reconciles a Alias object
 type AliasReconciler struct {
@@ -55,6 +59,19 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	log.Info("Reconciling Alias", "name", alias.Name, "namespace", alias.Namespace)
+
+	if !alias.DeletionTimestamp.IsZero() {
+		// Being deleted — handled in a later chunk.
+		return ctrl.Result{}, nil
+	}
+
+	if !controllerutil.ContainsFinalizer(alias, aliasFinalizer) {
+		controllerutil.AddFinalizer(alias, aliasFinalizer)
+		if err := r.Update(ctx, alias); err != nil {
+			return ctrl.Result{}, fmt.Errorf("add finalizer: %w", err)
+		}
+		return ctrl.Result{}, nil
+	}
 
 	return ctrl.Result{}, nil
 }

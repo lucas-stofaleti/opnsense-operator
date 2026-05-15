@@ -88,5 +88,14 @@ var _ = Describe("Alias Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(reconcile.Result{}))
 		})
+
+		It("adds the finalizer", func() {
+			_, err := reconcileAlias(aliasName, aliasNS)
+			Expect(err).NotTo(HaveOccurred())
+
+			alias := &firewallv1alpha1.Alias{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias)).To(Succeed())
+			Expect(alias.Finalizers).To(ContainElement("firewall.opnsense.io/finalizer"))
+		})
 	})
 })
