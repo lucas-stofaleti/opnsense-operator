@@ -89,6 +89,8 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				return r.setReadyFailed(ctx, alias, "DeleteFailed", err.Error(), err)
 			}
 			log.Info("Alias not found in OPNsense, treating as already deleted", "uuid", alias.Status.UUID)
+		} else {
+			log.Info("Deleted Alias in OPNsense", "uuid", alias.Status.UUID)
 		}
 		if err := opnsenseClient.ReconfigureAliases(ctx); err != nil {
 			return r.setReadyFailed(ctx, alias, "ReconfigureFailed", err.Error(), err)
