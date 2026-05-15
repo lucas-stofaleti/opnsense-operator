@@ -20,13 +20,18 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	firewallv1alpha1 "github.com/lucas-stofaleti/opnsense-operator/api/v1alpha1"
+	"github.com/lucas-stofaleti/opnsense-operator/internal/opnsense"
 )
 
 const aliasFinalizer = "firewall.opnsense.io/finalizer"
@@ -86,6 +91,12 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
+	opnsenseClient, reason, err := r.buildOPNsenseClient(ctx, alias)
+	if err != nil {
+		return r.setReadyFailed(ctx, alias, reason, err.Error(), err)
+	}
+	_ = opnsenseClient // used in subsequent chunks
+
 	return ctrl.Result{}, nil
 }
 
@@ -95,4 +106,64 @@ func (r *AliasReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&firewallv1alpha1.Alias{}).
 		Named("alias").
 		Complete(r)
+}
+
+// buildOPNsenseClient fetches the referenced OPNsenseConnection and credentials Secret,
+// validates them, and returns a ready-to-use OPNsense client.
+// The returned string is the status condition Reason to use if an error is returned.
+func (r *AliasReconciler) buildOPNsenseClient(ctx context.Context, alias *firewallv1alpha1.Alias) (*opnsense.Client, string, error) {
+	conn := &firewallv1alpha1.OPNsenseConnection{}
+	if err := r.Get(ctx, types.NamespacedName{Name: alias.Spec.ConnectionRef.Name}, conn); err != nil {
+		return nil, "ConnectionNotFound", fmt.Errorf("fetch OPNsenseConnection %q: %w", alias.Spec.ConnectionRef.Name, err)
+	}
+
+	readyCond := meta.FindStatusCondition(conn.Status.Conditions, "Ready")
+	if readyCond == nil || readyCond.Status != metav1.ConditionTrue {
+		return nil, "ConnectionNotReady", fmt.Errorf("OPNsenseConnection %q is not ready", conn.Name)
+	}
+
+	secretKey := types.NamespacedName{
+		Name:      conn.Spec.Credentials.SecretRef.Name,
+		Namespace: conn.Spec.Credentials.SecretRef.Namespace,
+	}
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, secretKey, secret); err != nil {
+		return nil, "CredentialsNotFound", fmt.Errorf("fetch credentials Secret %s/%s: %w", secretKey.Namespace, secretKey.Name, err)
+	}
+
+	apiKey := string(secret.Data["apiKey"])
+	apiSecret := string(secret.Data["apiSecret"])
+	if apiKey == "" || apiSecret == "" {
+		return nil, "CredentialsInvalid", fmt.Errorf("credentials Secret %s/%s must have non-empty 'apiKey' and 'apiSecret'", secretKey.Namespace, secretKey.Name)
+	}
+
+	httpClient, err := buildHTTPClient(ctx, r.Client, conn.Spec.TLS)
+	if err != nil {
+		return nil, "TLSConfigFailed", fmt.Errorf("build TLS client: %w", err)
+	}
+
+	return opnsense.NewClient(conn.Spec.URL, apiKey, apiSecret, httpClient), "", nil
+}
+
+// setReadyFailed sets the Ready condition to False and returns the cause error.
+func (r *AliasReconciler) setReadyFailed(ctx context.Context, alias *firewallv1alpha1.Alias, reason, message string, cause error) (ctrl.Result, error) {
+	if err := r.setReadyCondition(ctx, alias, metav1.ConditionFalse, reason, message); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, cause
+}
+
+// setReadyCondition updates the Ready status condition on the Alias.
+func (r *AliasReconciler) setReadyCondition(ctx context.Context, alias *firewallv1alpha1.Alias, status metav1.ConditionStatus, reason, message string) error {
+	meta.SetStatusCondition(&alias.Status.Conditions, metav1.Condition{
+		Type:               "Ready",
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: alias.Generation,
+	})
+	if err := r.Status().Update(ctx, alias); err != nil {
+		return fmt.Errorf("update Alias status: %w", err)
+	}
+	return nil
 }
