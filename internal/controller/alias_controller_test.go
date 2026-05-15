@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -79,6 +80,8 @@ var _ = Describe("Alias Controller", func() {
 			By("deleting the Alias CR")
 			alias := &firewallv1alpha1.Alias{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias); err == nil {
+				alias.Finalizers = nil
+				Expect(k8sClient.Update(ctx, alias)).To(Succeed())
 				Expect(k8sClient.Delete(ctx, alias)).To(Succeed())
 			}
 		})
@@ -96,6 +99,57 @@ var _ = Describe("Alias Controller", func() {
 			alias := &firewallv1alpha1.Alias{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias)).To(Succeed())
 			Expect(alias.Finalizers).To(ContainElement("firewall.opnsense.io/finalizer"))
+		})
+	})
+
+	Context("When the Alias is being deleted with no status UUID", func() {
+		const aliasName = "test-alias-delete-no-uuid"
+		const aliasNS = "default"
+
+		BeforeEach(func() {
+			By("creating the Alias CR with a finalizer already set")
+			alias := &firewallv1alpha1.Alias{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       aliasName,
+					Namespace:  aliasNS,
+					Finalizers: []string{aliasFinalizer},
+				},
+				Spec: firewallv1alpha1.AliasSpec{
+					ConnectionRef: firewallv1alpha1.OPNsenseConnectionReference{Name: "primary"},
+					Name:          "allow_dns",
+					Type:          "host",
+					Entries:       []string{"198.51.100.10"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, alias)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			By("cleaning up the Alias CR if it still exists")
+			alias := &firewallv1alpha1.Alias{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias); err == nil {
+				alias.Finalizers = nil
+				Expect(k8sClient.Update(ctx, alias)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, alias)).To(Succeed())
+			}
+		})
+
+		It("removes the finalizer and allows the object to be deleted", func() {
+			By("deleting the Alias CR to set deletionTimestamp")
+			alias := &firewallv1alpha1.Alias{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, alias)).To(Succeed())
+
+			By("reconciling — should remove the finalizer")
+			result, err := reconcileAlias(aliasName, aliasNS)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			By("verifying the object is eventually gone")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, &firewallv1alpha1.Alias{})
+				return errors.IsNotFound(err)
+			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
 		})
 	})
 })

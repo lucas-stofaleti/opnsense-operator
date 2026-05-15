@@ -61,7 +61,20 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	log.Info("Reconciling Alias", "name", alias.Name, "namespace", alias.Namespace)
 
 	if !alias.DeletionTimestamp.IsZero() {
-		// Being deleted — handled in a later chunk.
+		if !controllerutil.ContainsFinalizer(alias, aliasFinalizer) {
+			return ctrl.Result{}, nil
+		}
+
+		if alias.Status.UUID == "" {
+			log.Info("Removing finalizer for Alias with no external resource")
+			controllerutil.RemoveFinalizer(alias, aliasFinalizer)
+			if err := r.Update(ctx, alias); err != nil {
+				return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+			}
+			return ctrl.Result{}, nil
+		}
+
+		// Has UUID — will be handled in chunk 5.
 		return ctrl.Result{}, nil
 	}
 
