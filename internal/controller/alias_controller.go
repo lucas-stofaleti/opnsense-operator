@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -79,7 +80,23 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, nil
 		}
 
-		// Has UUID — will be handled in chunk 5.
+		opnsenseClient, reason, err := r.buildOPNsenseClient(ctx, alias)
+		if err != nil {
+			return r.setReadyFailed(ctx, alias, reason, err.Error(), err)
+		}
+		if err := opnsenseClient.DeleteAlias(ctx, alias.Status.UUID); err != nil {
+			if !errors.Is(err, opnsense.ErrAliasNotFound) {
+				return r.setReadyFailed(ctx, alias, "DeleteFailed", err.Error(), err)
+			}
+			log.Info("Alias not found in OPNsense, treating as already deleted", "uuid", alias.Status.UUID)
+		}
+		if err := opnsenseClient.ReconfigureAliases(ctx); err != nil {
+			return r.setReadyFailed(ctx, alias, "ReconfigureFailed", err.Error(), err)
+		}
+		controllerutil.RemoveFinalizer(alias, aliasFinalizer)
+		if err := r.Update(ctx, alias); err != nil {
+			return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+		}
 		return ctrl.Result{}, nil
 	}
 

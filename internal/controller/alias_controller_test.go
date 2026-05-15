@@ -18,6 +18,9 @@ package controller
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -327,6 +330,190 @@ var _ = Describe("Alias Controller", func() {
 						})
 					})
 				})
+			})
+		})
+	})
+
+	Context("When the Alias is being deleted with a status UUID", func() {
+		const aliasName = "test-alias-delete-uuid"
+		const aliasNS = "default"
+		const connName = "test-conn-delete-uuid"
+		const secretName = "test-conn-delete-uuid-creds"
+		const secretNS = "default"
+		const testUUID = "514ae60a-a270-47df-afdd-b9cdc6fb5c7f"
+
+		var server *httptest.Server
+		var deleteResponseBody string
+		var reconfigureResponseBody string
+
+		BeforeEach(func() {
+			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/firewall/alias/delItem/"):
+					_, _ = w.Write([]byte(deleteResponseBody))
+				case r.Method == http.MethodPost && r.URL.Path == "/api/firewall/alias/reconfigure":
+					_, _ = w.Write([]byte(reconfigureResponseBody))
+				default:
+					http.Error(w, "unexpected request", http.StatusInternalServerError)
+				}
+			}))
+
+			By("creating the OPNsenseConnection pointing to the mock server")
+			conn := &firewallv1alpha1.OPNsenseConnection{
+				ObjectMeta: metav1.ObjectMeta{Name: connName},
+				Spec: firewallv1alpha1.OPNsenseConnectionSpec{
+					URL: server.URL,
+					Credentials: firewallv1alpha1.CredentialsSpec{
+						SecretRef: firewallv1alpha1.SecretReference{
+							Name:      secretName,
+							Namespace: secretNS,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, conn)).To(Succeed())
+			conn.Status.Conditions = []metav1.Condition{{
+				Type:               "Ready",
+				Status:             metav1.ConditionTrue,
+				Reason:             "ConnectionVerified",
+				Message:            "Connection verified",
+				LastTransitionTime: metav1.Now(),
+			}}
+			Expect(k8sClient.Status().Update(ctx, conn)).To(Succeed())
+
+			By("creating the credentials Secret")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: secretNS},
+				Data: map[string][]byte{
+					"apiKey":    []byte("test-api-key"),
+					"apiSecret": []byte("test-api-secret"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+			By("creating the Alias CR with a finalizer and status UUID")
+			alias := &firewallv1alpha1.Alias{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       aliasName,
+					Namespace:  aliasNS,
+					Finalizers: []string{aliasFinalizer},
+				},
+				Spec: firewallv1alpha1.AliasSpec{
+					ConnectionRef: firewallv1alpha1.OPNsenseConnectionReference{Name: connName},
+					Name:          "allow_dns",
+					Type:          "host",
+					Entries:       []string{"198.51.100.10"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, alias)).To(Succeed())
+			alias.Status.UUID = testUUID
+			Expect(k8sClient.Status().Update(ctx, alias)).To(Succeed())
+
+			By("deleting the Alias CR to set deletionTimestamp")
+			Expect(k8sClient.Delete(ctx, alias)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			server.Close()
+			By("cleaning up the Alias CR")
+			alias := &firewallv1alpha1.Alias{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias); err == nil {
+				alias.Finalizers = nil
+				Expect(k8sClient.Update(ctx, alias)).To(Succeed())
+				// The object may already have DeletionTimestamp set; ignore NotFound on Delete.
+				if err := k8sClient.Delete(ctx, alias); err != nil && !errors.IsNotFound(err) {
+					Expect(err).NotTo(HaveOccurred())
+				}
+			}
+			By("cleaning up the OPNsenseConnection")
+			conn := &firewallv1alpha1.OPNsenseConnection{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: connName}, conn); err == nil {
+				Expect(k8sClient.Delete(ctx, conn)).To(Succeed())
+			}
+			By("cleaning up the credentials Secret")
+			secret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, secret); err == nil {
+				Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+			}
+		})
+
+		Context("When DeleteAlias succeeds and ReconfigureAliases succeeds", func() {
+			BeforeEach(func() {
+				deleteResponseBody = `{"result":"deleted"}`
+				reconfigureResponseBody = `{"status":"ok"}`
+			})
+
+			It("removes the finalizer and allows the object to be deleted", func() {
+				result, err := reconcileAlias(aliasName, aliasNS)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(reconcile.Result{}))
+
+				Eventually(func() bool {
+					err := k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, &firewallv1alpha1.Alias{})
+					return errors.IsNotFound(err)
+				}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
+			})
+		})
+
+		Context("When DeleteAlias returns ErrAliasNotFound", func() {
+			BeforeEach(func() {
+				deleteResponseBody = `{"result":"not found"}`
+				reconfigureResponseBody = `{"status":"ok"}`
+			})
+
+			It("treats it as already deleted and removes the finalizer", func() {
+				result, err := reconcileAlias(aliasName, aliasNS)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(reconcile.Result{}))
+
+				Eventually(func() bool {
+					err := k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, &firewallv1alpha1.Alias{})
+					return errors.IsNotFound(err)
+				}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
+			})
+		})
+
+		Context("When DeleteAlias fails", func() {
+			BeforeEach(func() {
+				deleteResponseBody = `{"result":"failed"}`
+			})
+
+			It("sets Ready=False with DeleteFailed reason", func() {
+				_, err := reconcileAlias(aliasName, aliasNS)
+				Expect(err).To(HaveOccurred())
+
+				alias := &firewallv1alpha1.Alias{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias)).To(Succeed())
+				Expect(alias.Status.Conditions).To(ContainElement(
+					And(
+						HaveField("Type", Equal("Ready")),
+						HaveField("Status", Equal(metav1.ConditionFalse)),
+						HaveField("Reason", Equal("DeleteFailed")),
+					),
+				))
+			})
+		})
+
+		Context("When ReconfigureAliases fails", func() {
+			BeforeEach(func() {
+				deleteResponseBody = `{"result":"deleted"}`
+				reconfigureResponseBody = `{"status":"failed"}`
+			})
+
+			It("sets Ready=False with ReconfigureFailed reason", func() {
+				_, err := reconcileAlias(aliasName, aliasNS)
+				Expect(err).To(HaveOccurred())
+
+				alias := &firewallv1alpha1.Alias{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias)).To(Succeed())
+				Expect(alias.Status.Conditions).To(ContainElement(
+					And(
+						HaveField("Type", Equal("Ready")),
+						HaveField("Status", Equal(metav1.ConditionFalse)),
+						HaveField("Reason", Equal("ReconfigureFailed")),
+					),
+				))
 			})
 		})
 	})
