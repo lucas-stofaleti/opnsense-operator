@@ -18,10 +18,7 @@ package controller
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"net/http"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -84,7 +81,7 @@ func (r *OPNsenseConnectionReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// Build the HTTP client, optionally applying TLS configuration from the spec.
-	httpClient, err := r.buildHTTPClient(ctx, conn.Spec.TLS)
+	httpClient, err := buildHTTPClient(ctx, r.Client, conn.Spec.TLS)
 	if err != nil {
 		return r.setReadyFailed(ctx, conn, "ConnectionFailed",
 			fmt.Sprintf("Could not configure TLS for OPNsense at %s: %s", conn.Spec.URL, err),
@@ -127,49 +124,6 @@ func (r *OPNsenseConnectionReconciler) setReadyCondition(ctx context.Context, co
 		return fmt.Errorf("update OPNsenseConnection status: %w", err)
 	}
 	return nil
-}
-
-// buildHTTPClient constructs an *http.Client with TLS settings derived from the spec.
-// Returns nil when no custom TLS is needed, which causes opnsense.NewClient to use http.DefaultClient.
-func (r *OPNsenseConnectionReconciler) buildHTTPClient(ctx context.Context, tlsSpec *firewallv1alpha1.TLSSpec) (*http.Client, error) {
-	if tlsSpec == nil {
-		return nil, nil
-	}
-
-	// A custom CA takes precedence over insecureSkipVerify.
-	if tlsSpec.CASecretRef != nil {
-		caKey := types.NamespacedName{
-			Name:      tlsSpec.CASecretRef.Name,
-			Namespace: tlsSpec.CASecretRef.Namespace,
-		}
-		caSecret := &corev1.Secret{}
-		if err := r.Get(ctx, caKey, caSecret); err != nil {
-			return nil, fmt.Errorf("fetch CA Secret %s/%s: %w", caKey.Namespace, caKey.Name, err)
-		}
-		caCert, ok := caSecret.Data["ca.crt"]
-		if !ok || len(caCert) == 0 {
-			return nil, fmt.Errorf("CA Secret %s/%s must have a non-empty key 'ca.crt'", caKey.Namespace, caKey.Name)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse CA certificate from Secret %s/%s", caKey.Namespace, caKey.Name)
-		}
-		return &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{RootCAs: pool},
-			},
-		}, nil
-	}
-
-	if tlsSpec.InsecureSkipVerify {
-		return &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-			},
-		}, nil
-	}
-
-	return nil, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
