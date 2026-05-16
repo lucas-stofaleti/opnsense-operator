@@ -114,9 +114,47 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if err != nil {
 		return r.setReadyFailed(ctx, alias, reason, err.Error(), err)
 	}
-	_ = opnsenseClient // used in subsequent chunks
+
+	resolvedUUID, existingAlias, err := r.resolveExternalAlias(ctx, opnsenseClient, alias)
+	if err != nil {
+		return r.setReadyFailed(ctx, alias, "LookupFailed", err.Error(), err)
+	}
+	_ = resolvedUUID  // used in chunks 8-10
+	_ = existingAlias // used in chunks 8-10
 
 	return ctrl.Result{}, nil
+}
+
+// resolveExternalAlias determines whether the alias exists in OPNsense and returns its
+// current UUID and state. If status.uuid is set, it tries GetAlias first; if that returns
+// not found (stale UUID), it falls back to GetAliasUUIDByName. If no UUID is set, it goes
+// directly to GetAliasUUIDByName. Returns ("", nil, nil) when the alias does not exist.
+func (r *AliasReconciler) resolveExternalAlias(ctx context.Context, c *opnsense.Client, alias *firewallv1alpha1.Alias) (string, *opnsense.Alias, error) {
+	if alias.Status.UUID != "" {
+		existing, err := c.GetAlias(ctx, alias.Status.UUID)
+		if err == nil {
+			return alias.Status.UUID, &existing, nil
+		}
+		if !errors.Is(err, opnsense.ErrAliasNotFound) {
+			return "", nil, err
+		}
+		// UUID is stale — fall through to name lookup.
+	}
+
+	uuid, err := c.GetAliasUUIDByName(ctx, alias.Spec.Name)
+	if err != nil {
+		if errors.Is(err, opnsense.ErrAliasNotFound) {
+			return "", nil, nil
+		}
+		return "", nil, err
+	}
+
+	existing, err := c.GetAlias(ctx, uuid)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return uuid, &existing, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

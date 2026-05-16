@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -308,7 +309,25 @@ var _ = Describe("Alias Controller", func() {
 					})
 
 					Context("When credentials are valid", func() {
+						var server *httptest.Server
+
 						BeforeEach(func() {
+							By("starting a mock OPNsense server")
+							server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+								if strings.HasPrefix(r.URL.Path, "/api/firewall/alias/getAliasUUID") {
+									// Alias not found by name — simulates the pre-create state.
+									fmt.Fprint(w, `[]`)
+									return
+								}
+								w.WriteHeader(http.StatusNotFound)
+							}))
+
+							By("updating the OPNsenseConnection URL to the mock server")
+							conn := &firewallv1alpha1.OPNsenseConnection{}
+							Expect(k8sClient.Get(ctx, types.NamespacedName{Name: connName}, conn)).To(Succeed())
+							conn.Spec.URL = server.URL
+							Expect(k8sClient.Update(ctx, conn)).To(Succeed())
+
 							By("updating the credentials Secret with valid keys")
 							secret := &corev1.Secret{}
 							Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, secret)).To(Succeed())
@@ -319,7 +338,11 @@ var _ = Describe("Alias Controller", func() {
 							Expect(k8sClient.Update(ctx, secret)).To(Succeed())
 						})
 
-						It("builds the client successfully and returns no error", func() {
+						AfterEach(func() {
+							server.Close()
+						})
+
+						It("builds the client and resolves identity successfully with no error", func() {
 							result, err := reconcileAlias(aliasName, aliasNS)
 							Expect(err).NotTo(HaveOccurred())
 							Expect(result).To(Equal(reconcile.Result{}))
