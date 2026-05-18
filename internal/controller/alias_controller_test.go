@@ -309,17 +309,27 @@ var _ = Describe("Alias Controller", func() {
 					})
 
 					Context("When credentials are valid", func() {
+						const newAliasUUID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+
 						var server *httptest.Server
+						var createResponseBody string
+						var reconfigureResponseBody string
 
 						BeforeEach(func() {
 							By("starting a mock OPNsense server")
 							server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-								if strings.HasPrefix(r.URL.Path, "/api/firewall/alias/getAliasUUID") {
-									// Alias not found by name — simulates the pre-create state.
+								w.Header().Set("Content-Type", "application/json")
+								switch {
+								case strings.HasPrefix(r.URL.Path, "/api/firewall/alias/getAliasUUID"):
+									// Alias not found by name — pre-create state.
 									fmt.Fprint(w, `[]`)
-									return
+								case r.Method == http.MethodPost && r.URL.Path == "/api/firewall/alias/addItem":
+									fmt.Fprint(w, createResponseBody)
+								case r.Method == http.MethodPost && r.URL.Path == "/api/firewall/alias/reconfigure":
+									fmt.Fprint(w, reconfigureResponseBody)
+								default:
+									w.WriteHeader(http.StatusNotFound)
 								}
-								w.WriteHeader(http.StatusNotFound)
 							}))
 
 							By("updating the OPNsenseConnection URL to the mock server")
@@ -342,14 +352,97 @@ var _ = Describe("Alias Controller", func() {
 							server.Close()
 						})
 
-						It("builds the client and resolves identity successfully with no error", func() {
-							result, err := reconcileAlias(aliasName, aliasNS)
-							Expect(err).NotTo(HaveOccurred())
-							Expect(result).To(Equal(reconcile.Result{}))
+						Context("When the alias does not exist in OPNsense", func() {
+							Context("and CreateAlias and ReconfigureAliases succeed", func() {
+								BeforeEach(func() {
+									createResponseBody = fmt.Sprintf(`{"result":"saved","uuid":%q}`, newAliasUUID)
+									reconfigureResponseBody = `{"status":"ok"}`
+								})
 
-							alias := &firewallv1alpha1.Alias{}
-							Expect(k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias)).To(Succeed())
-							Expect(alias.Status.Conditions).To(BeEmpty())
+								It("creates the alias and sets status.uuid, observedGeneration, and Ready=True", func() {
+									result, err := reconcileAlias(aliasName, aliasNS)
+									Expect(err).NotTo(HaveOccurred())
+									Expect(result).To(Equal(reconcile.Result{}))
+
+									alias := &firewallv1alpha1.Alias{}
+									Expect(k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias)).To(Succeed())
+									Expect(alias.Status.UUID).To(Equal(newAliasUUID))
+									Expect(alias.Status.ObservedGeneration).To(Equal(alias.Generation))
+									Expect(alias.Status.Conditions).To(ContainElement(
+										And(
+											HaveField("Type", Equal("Ready")),
+											HaveField("Status", Equal(metav1.ConditionTrue)),
+											HaveField("Reason", Equal("AliasReady")),
+										),
+									))
+								})
+							})
+
+							Context("and CreateAlias returns a validation error", func() {
+								BeforeEach(func() {
+									createResponseBody = `{"result":"failed","validations":{"alias.name":"Name already exists"}}`
+								})
+
+								It("sets Ready=False with ValidationFailed reason", func() {
+									_, err := reconcileAlias(aliasName, aliasNS)
+									Expect(err).To(HaveOccurred())
+
+									alias := &firewallv1alpha1.Alias{}
+									Expect(k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias)).To(Succeed())
+									Expect(alias.Status.Conditions).To(ContainElement(
+										And(
+											HaveField("Type", Equal("Ready")),
+											HaveField("Status", Equal(metav1.ConditionFalse)),
+											HaveField("Reason", Equal("ValidationFailed")),
+										),
+									))
+								})
+							})
+
+							Context("and CreateAlias returns an unexpected error", func() {
+								BeforeEach(func() {
+									// "result":"error" is not "saved" and not "failed", so the client
+									// returns ErrUnexpectedResponse rather than ErrValidationFailed.
+									createResponseBody = `{"result":"error"}`
+								})
+
+								It("sets Ready=False with CreateFailed reason", func() {
+									_, err := reconcileAlias(aliasName, aliasNS)
+									Expect(err).To(HaveOccurred())
+
+									alias := &firewallv1alpha1.Alias{}
+									Expect(k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias)).To(Succeed())
+									Expect(alias.Status.Conditions).To(ContainElement(
+										And(
+											HaveField("Type", Equal("Ready")),
+											HaveField("Status", Equal(metav1.ConditionFalse)),
+											HaveField("Reason", Equal("CreateFailed")),
+										),
+									))
+								})
+							})
+
+							Context("and CreateAlias succeeds but ReconfigureAliases fails", func() {
+								BeforeEach(func() {
+									createResponseBody = fmt.Sprintf(`{"result":"saved","uuid":%q}`, newAliasUUID)
+									reconfigureResponseBody = `{"status":"failed"}`
+								})
+
+								It("sets Ready=False with ReconfigureFailed reason", func() {
+									_, err := reconcileAlias(aliasName, aliasNS)
+									Expect(err).To(HaveOccurred())
+
+									alias := &firewallv1alpha1.Alias{}
+									Expect(k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias)).To(Succeed())
+									Expect(alias.Status.Conditions).To(ContainElement(
+										And(
+											HaveField("Type", Equal("Ready")),
+											HaveField("Status", Equal(metav1.ConditionFalse)),
+											HaveField("Reason", Equal("ReconfigureFailed")),
+										),
+									))
+								})
+							})
 						})
 					})
 				})

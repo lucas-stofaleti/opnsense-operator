@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -119,8 +120,30 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if err != nil {
 		return r.setReadyFailed(ctx, alias, "LookupFailed", err.Error(), err)
 	}
-	_ = resolvedUUID  // used in chunks 8-10
-	_ = existingAlias // used in chunks 8-10
+
+	specAlias := specToAlias(alias.Spec)
+
+	if existingAlias == nil {
+		newUUID, err := opnsenseClient.CreateAlias(ctx, specAlias)
+		if err != nil {
+			reason := "CreateFailed"
+			if errors.Is(err, opnsense.ErrValidationFailed) {
+				reason = "ValidationFailed"
+			}
+			return r.setReadyFailed(ctx, alias, reason, err.Error(), err)
+		}
+		resolvedUUID = newUUID
+		log.Info("Created Alias in OPNsense", "uuid", resolvedUUID)
+
+		if err := opnsenseClient.ReconfigureAliases(ctx); err != nil {
+			return r.setReadyFailed(ctx, alias, "ReconfigureFailed", err.Error(), err)
+		}
+
+		return r.setReadySuccess(ctx, alias, resolvedUUID)
+	}
+
+	_ = resolvedUUID  // used in chunks 9-10
+	_ = existingAlias // used in chunks 9-10
 
 	return ctrl.Result{}, nil
 }
@@ -210,6 +233,16 @@ func (r *AliasReconciler) setReadyFailed(ctx context.Context, alias *firewallv1a
 	return ctrl.Result{}, cause
 }
 
+// setReadySuccess sets the Ready condition to True, stores the UUID and observedGeneration in status.
+func (r *AliasReconciler) setReadySuccess(ctx context.Context, alias *firewallv1alpha1.Alias, uuid string) (ctrl.Result, error) {
+	alias.Status.UUID = uuid
+	alias.Status.ObservedGeneration = alias.Generation
+	if err := r.setReadyCondition(ctx, alias, metav1.ConditionTrue, "AliasReady", "Alias is in sync with OPNsense"); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
 // setReadyCondition updates the Ready status condition on the Alias.
 func (r *AliasReconciler) setReadyCondition(ctx context.Context, alias *firewallv1alpha1.Alias, status metav1.ConditionStatus, reason, message string) error {
 	meta.SetStatusCondition(&alias.Status.Conditions, metav1.Condition{
@@ -223,4 +256,16 @@ func (r *AliasReconciler) setReadyCondition(ctx context.Context, alias *firewall
 		return fmt.Errorf("update Alias status: %w", err)
 	}
 	return nil
+}
+
+// specToAlias converts an AliasSpec to the opnsense.Alias representation.
+// Entries are joined with newlines as required by the OPNsense API.
+func specToAlias(spec firewallv1alpha1.AliasSpec) opnsense.Alias {
+	return opnsense.Alias{
+		Enabled:     spec.Enabled,
+		Name:        spec.Name,
+		Type:        spec.Type,
+		Content:     strings.Join(spec.Entries, "\n"),
+		Description: spec.Description,
+	}
 }
