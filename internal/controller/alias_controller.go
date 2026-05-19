@@ -142,10 +142,32 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return r.setReadySuccess(ctx, alias, resolvedUUID)
 	}
 
-	_ = resolvedUUID  // used in chunks 9-10
-	_ = existingAlias // used in chunks 9-10
+	if aliasNeedsUpdate(alias.Spec, *existingAlias) {
+		if err := opnsenseClient.UpdateAlias(ctx, resolvedUUID, specAlias); err != nil {
+			reason := "UpdateFailed"
+			if errors.Is(err, opnsense.ErrValidationFailed) {
+				reason = "ValidationFailed"
+			}
+			return r.setReadyFailed(ctx, alias, reason, err.Error(), err)
+		}
+		log.Info("Updated Alias in OPNsense", "uuid", resolvedUUID)
 
-	return ctrl.Result{}, nil
+		if err := opnsenseClient.ReconfigureAliases(ctx); err != nil {
+			return r.setReadyFailed(ctx, alias, "ReconfigureFailed", err.Error(), err)
+		}
+	} else {
+		// Spec matches external state. Skip status update if it already reflects
+		// the current state — avoids triggering a new reconcile loop.
+		readyCond := meta.FindStatusCondition(alias.Status.Conditions, "Ready")
+		if alias.Status.UUID == resolvedUUID &&
+			alias.Status.ObservedGeneration == alias.Generation &&
+			readyCond != nil && readyCond.Status == metav1.ConditionTrue {
+			log.Info("Alias is already in sync with OPNsense", "uuid", resolvedUUID)
+			return ctrl.Result{}, nil
+		}
+	}
+
+	return r.setReadySuccess(ctx, alias, resolvedUUID)
 }
 
 // resolveExternalAlias determines whether the alias exists in OPNsense and returns its
@@ -258,7 +280,15 @@ func (r *AliasReconciler) setReadyCondition(ctx context.Context, alias *firewall
 	return nil
 }
 
-// specToAlias converts an AliasSpec to the opnsense.Alias representation.
+// aliasNeedsUpdate returns true if the desired spec differs from the current
+// external alias state in any field that the operator manages.
+func aliasNeedsUpdate(spec firewallv1alpha1.AliasSpec, existing opnsense.Alias) bool {
+	return spec.Enabled != existing.Enabled ||
+		spec.Type != existing.Type ||
+		spec.Description != existing.Description ||
+		strings.Join(spec.Entries, "\n") != existing.Content
+}
+
 // Entries are joined with newlines as required by the OPNsense API.
 func specToAlias(spec firewallv1alpha1.AliasSpec) opnsense.Alias {
 	return opnsense.Alias{
