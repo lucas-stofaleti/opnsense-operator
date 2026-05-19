@@ -38,12 +38,17 @@ import (
 var _ = Describe("Alias Controller", func() {
 	ctx := context.Background()
 
+	var reconcileAliasWithContext func(context.Context, string, string) (reconcile.Result, error)
 	reconcileAlias := func(name, namespace string) (reconcile.Result, error) {
+		return reconcileAliasWithContext(ctx, name, namespace)
+	}
+
+	reconcileAliasWithContext = func(reconcileCtx context.Context, name, namespace string) (reconcile.Result, error) {
 		r := &AliasReconciler{
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 		}
-		return r.Reconcile(ctx, reconcile.Request{
+		return r.Reconcile(reconcileCtx, reconcile.Request{
 			NamespacedName: types.NamespacedName{Name: name, Namespace: namespace},
 		})
 	}
@@ -154,6 +159,60 @@ var _ = Describe("Alias Controller", func() {
 				err := k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, &firewallv1alpha1.Alias{})
 				return errors.IsNotFound(err)
 			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
+		})
+
+		It("logs finalizer removal after the update succeeds", func() {
+			By("deleting the Alias CR to set deletionTimestamp")
+			alias := &firewallv1alpha1.Alias{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, alias)).To(Succeed())
+
+			logs := captureControllerLogs(func(logCtx context.Context) {
+				_, err := reconcileAliasWithContext(logCtx, aliasName, aliasNS)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			Expect(logs).To(ContainSubstring("Removed Alias finalizer because no external resource exists"))
+			Expect(logs).NotTo(ContainSubstring("Removing finalizer for Alias with no external resource"))
+		})
+	})
+
+	Context("When the Alias only needs a finalizer", func() {
+		const aliasName = "test-alias-finalizer-only"
+		const aliasNS = "default"
+
+		BeforeEach(func() {
+			alias := &firewallv1alpha1.Alias{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      aliasName,
+					Namespace: aliasNS,
+				},
+				Spec: firewallv1alpha1.AliasSpec{
+					ConnectionRef: firewallv1alpha1.OPNsenseConnectionReference{Name: "primary"},
+					Name:          "allow_http",
+					Type:          "host",
+					Entries:       []string{"198.51.100.20"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, alias)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			alias := &firewallv1alpha1.Alias{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: aliasName, Namespace: aliasNS}, alias); err == nil {
+				alias.Finalizers = nil
+				Expect(k8sClient.Update(ctx, alias)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, alias)).To(Succeed())
+			}
+		})
+
+		It("does not log routine reconcile start messages", func() {
+			logs := captureControllerLogs(func(logCtx context.Context) {
+				_, err := reconcileAliasWithContext(logCtx, aliasName, aliasNS)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			Expect(logs).NotTo(ContainSubstring("Reconciling Alias"))
 		})
 	})
 

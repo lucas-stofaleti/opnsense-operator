@@ -87,12 +87,17 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 
 	// reconcileConnection is a helper that creates a fresh reconciler and triggers
 	// a single reconciliation for the given OPNsenseConnection name.
+	var reconcileConnectionWithContext func(context.Context, string) (reconcile.Result, error)
 	reconcileConnection := func(name string) (reconcile.Result, error) {
+		return reconcileConnectionWithContext(ctx, name)
+	}
+
+	reconcileConnectionWithContext = func(reconcileCtx context.Context, name string) (reconcile.Result, error) {
 		r := &OPNsenseConnectionReconciler{
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 		}
-		return r.Reconcile(ctx, reconcile.Request{
+		return r.Reconcile(reconcileCtx, reconcile.Request{
 			NamespacedName: types.NamespacedName{Name: name},
 		})
 	}
@@ -153,6 +158,15 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 			Expect(cond.Reason).To(Equal("ConnectionVerified"))
+		})
+
+		It("does not log routine successful connectivity checks", func() {
+			logs := captureControllerLogs(func(logCtx context.Context) {
+				_, err := reconcileConnectionWithContext(logCtx, connName)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			Expect(logs).NotTo(ContainSubstring("Connectivity check succeeded"))
 		})
 	})
 

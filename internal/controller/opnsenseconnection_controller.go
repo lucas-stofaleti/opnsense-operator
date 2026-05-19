@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	firewallv1alpha1 "github.com/lucas-stofaleti/opnsense-operator/api/v1alpha1"
 	"github.com/lucas-stofaleti/opnsense-operator/internal/opnsense"
@@ -47,8 +46,6 @@ type OPNsenseConnectionReconciler struct {
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 func (r *OPNsenseConnectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-
 	conn := &firewallv1alpha1.OPNsenseConnection{}
 	if err := r.Get(ctx, req.NamespacedName, conn); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -62,7 +59,6 @@ func (r *OPNsenseConnectionReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 	if err := r.Get(ctx, secretKey, secret); err != nil {
 		if apierrors.IsNotFound(err) {
-			log.Info("Credentials Secret not found", "secret", secretKey)
 			return r.setReadyFailed(ctx, conn, "SecretNotFound",
 				fmt.Sprintf("Secret %s/%s not found", secretKey.Namespace, secretKey.Name),
 				err)
@@ -74,7 +70,6 @@ func (r *OPNsenseConnectionReconciler) Reconcile(ctx context.Context, req ctrl.R
 	apiKey := string(secret.Data["apiKey"])
 	apiSecret := string(secret.Data["apiSecret"])
 	if apiKey == "" || apiSecret == "" {
-		log.Info("Credentials Secret is missing required keys", "secret", secretKey)
 		return r.setReadyFailed(ctx, conn, "InvalidCredentials",
 			fmt.Sprintf("Secret %s/%s must have non-empty keys 'apiKey' and 'apiSecret'", secretKey.Namespace, secretKey.Name),
 			fmt.Errorf("Secret %s/%s is missing required credential keys", secretKey.Namespace, secretKey.Name))
@@ -91,13 +86,11 @@ func (r *OPNsenseConnectionReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// Perform a lightweight connectivity and authentication check against OPNsense.
 	opnsenseClient := opnsense.NewClient(conn.Spec.URL, apiKey, apiSecret, httpClient)
 	if err := opnsenseClient.CheckConnectivity(ctx); err != nil {
-		log.Info("Connectivity check failed", "url", conn.Spec.URL, "error", err)
 		return r.setReadyFailed(ctx, conn, "ConnectionFailed",
 			fmt.Sprintf("Could not connect to OPNsense at %s: %s", conn.Spec.URL, err),
 			err)
 	}
 
-	log.Info("Connectivity check succeeded", "url", conn.Spec.URL)
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, r.setReadyCondition(ctx, conn, metav1.ConditionTrue, "ConnectionVerified",
 		fmt.Sprintf("Successfully connected to OPNsense at %s", conn.Spec.URL))
 }

@@ -58,14 +58,12 @@ type AliasReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.3/pkg/reconcile
 func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
+	log := logf.FromContext(ctx).WithValues("alias", req.NamespacedName)
 
 	alias := &firewallv1alpha1.Alias{}
 	if err := r.Get(ctx, req.NamespacedName, alias); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-
-	log.Info("Reconciling Alias", "name", alias.Name, "namespace", alias.Namespace)
 
 	if !alias.DeletionTimestamp.IsZero() {
 		if !controllerutil.ContainsFinalizer(alias, aliasFinalizer) {
@@ -73,11 +71,11 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 
 		if alias.Status.UUID == "" {
-			log.Info("Removing finalizer for Alias with no external resource")
 			controllerutil.RemoveFinalizer(alias, aliasFinalizer)
 			if err := r.Update(ctx, alias); err != nil {
 				return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
 			}
+			log.Info("Removed Alias finalizer because no external resource exists", "opnsenseAlias", alias.Spec.Name)
 			return ctrl.Result{}, nil
 		}
 
@@ -89,9 +87,9 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if !errors.Is(err, opnsense.ErrAliasNotFound) {
 				return r.setReadyFailed(ctx, alias, "DeleteFailed", err.Error(), err)
 			}
-			log.Info("Alias not found in OPNsense, treating as already deleted", "uuid", alias.Status.UUID)
+			log.Info("Alias not found in OPNsense, treating as already deleted", "opnsenseAlias", alias.Spec.Name, "uuid", alias.Status.UUID)
 		} else {
-			log.Info("Deleted Alias in OPNsense", "uuid", alias.Status.UUID)
+			log.Info("Deleted Alias in OPNsense", "opnsenseAlias", alias.Spec.Name, "uuid", alias.Status.UUID)
 		}
 		if err := opnsenseClient.ReconfigureAliases(ctx); err != nil {
 			return r.setReadyFailed(ctx, alias, "ReconfigureFailed", err.Error(), err)
@@ -133,7 +131,7 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return r.setReadyFailed(ctx, alias, reason, err.Error(), err)
 		}
 		resolvedUUID = newUUID
-		log.Info("Created Alias in OPNsense", "uuid", resolvedUUID)
+		log.Info("Created Alias in OPNsense", "opnsenseAlias", alias.Spec.Name, "uuid", resolvedUUID)
 
 		if err := opnsenseClient.ReconfigureAliases(ctx); err != nil {
 			return r.setReadyFailed(ctx, alias, "ReconfigureFailed", err.Error(), err)
@@ -150,7 +148,7 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			}
 			return r.setReadyFailed(ctx, alias, reason, err.Error(), err)
 		}
-		log.Info("Updated Alias in OPNsense", "uuid", resolvedUUID)
+		log.Info("Updated Alias in OPNsense", "opnsenseAlias", alias.Spec.Name, "uuid", resolvedUUID)
 
 		if err := opnsenseClient.ReconfigureAliases(ctx); err != nil {
 			return r.setReadyFailed(ctx, alias, "ReconfigureFailed", err.Error(), err)
@@ -162,7 +160,6 @@ func (r *AliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if alias.Status.UUID == resolvedUUID &&
 			alias.Status.ObservedGeneration == alias.Generation &&
 			readyCond != nil && readyCond.Status == metav1.ConditionTrue {
-			log.Info("Alias is already in sync with OPNsense", "uuid", resolvedUUID)
 			return ctrl.Result{}, nil
 		}
 	}
