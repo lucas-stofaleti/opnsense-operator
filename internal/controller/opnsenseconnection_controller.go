@@ -98,7 +98,7 @@ func (r *OPNsenseConnectionReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	log.Info("Connectivity check succeeded", "url", conn.Spec.URL)
-	return ctrl.Result{RequeueAfter: 1 * time.Minute}, r.setReadyCondition(ctx, conn, metav1.ConditionTrue, "ConnectionVerified",
+	return ctrl.Result{RequeueAfter: 5 * time.Minute}, r.setReadyCondition(ctx, conn, metav1.ConditionTrue, "ConnectionVerified",
 		fmt.Sprintf("Successfully connected to OPNsense at %s", conn.Spec.URL))
 }
 

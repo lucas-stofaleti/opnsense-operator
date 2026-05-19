@@ -147,7 +147,7 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 		It("sets Ready=True and requeues after 1 minute", func() {
 			result, err := reconcileConnection(connName)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(1 * time.Minute))
+			Expect(result.RequeueAfter).To(Equal(5 * time.Minute))
 
 			cond := readyCondition(connName)
 			Expect(cond).NotTo(BeNil())
@@ -377,7 +377,7 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 		It("sets Ready=True by skipping TLS verification", func() {
 			result, err := reconcileConnection(connName)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(1 * time.Minute))
+			Expect(result.RequeueAfter).To(Equal(5 * time.Minute))
 
 			cond := readyCondition(connName)
 			Expect(cond).NotTo(BeNil())
@@ -461,7 +461,7 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 		It("sets Ready=True using the custom CA to verify TLS", func() {
 			result, err := reconcileConnection(connName)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(1 * time.Minute))
+			Expect(result.RequeueAfter).To(Equal(5 * time.Minute))
 
 			cond := readyCondition(connName)
 			Expect(cond).NotTo(BeNil())
