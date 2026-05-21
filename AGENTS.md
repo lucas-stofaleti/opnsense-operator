@@ -45,14 +45,19 @@ This project follows strict TDD. The order is non-negotiable:
 2. Run it and confirm it fails for the right reason.
 3. Write the minimum code to make it pass — nothing more.
 4. Run the tests and confirm they pass.
-5. Refactor if needed, keeping tests green.
-6. Write or run the integration test to confirm it works against real OPNsense.
+5. Run `make lint` and fix every issue before moving on. A change is not complete
+   if it introduces lint violations, even if all tests pass.
+6. Refactor if needed, keeping tests green and lint clean.
+7. Write or run the integration test to confirm it works against real OPNsense.
 
 Never write implementation code before a failing test exists. Never skip the
 "confirm it fails" step — a test that passes before implementation is a broken test.
 
 ### After implementing
 
+- Run `make lint-fix` to auto-correct formatting issues.
+- Run `make lint` and fix every reported issue. Zero issues is the only acceptable
+  outcome. Do not use `//nolint` suppressions without explicit agreement from the user.
 - Run the full unit test suite: `go test ./internal/...`
 - Run the relevant integration test against real OPNsense:
   `go test ./internal/opnsense/... -tags integration -v`
@@ -151,7 +156,9 @@ with the user before implementing.
   network call or could be cancelled.
 - Prefer explicit over clever. This codebase is a learning environment — clarity
   beats brevity.
-- Use `defer resp.Body.Close()` immediately after every HTTP response check.
+- Use `defer func() { _ = resp.Body.Close() }()` immediately after every HTTP
+  response check. The plain `defer resp.Body.Close()` form is flagged by `errcheck`
+  because the error return value is silently dropped.
 
 
 ## Kubernetes and kubebuilder standards
@@ -186,6 +193,8 @@ with the user before implementing.
 - Never write implementation code before a failing test exists.
 - Never assume OPNsense API behaviour — always verify with curl first.
 - Never skip the integration test step.
+- Never leave code that fails `make lint`. Run it after every change and fix all
+  reported issues before considering the work done.
 - Never include AI attribution in commits or code comments.
 - Never implement more than the agreed chunk without checking with the user first.
 - Never silently swallow errors.
