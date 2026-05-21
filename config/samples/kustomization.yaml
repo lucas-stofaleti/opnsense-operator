@@ -1,0 +1,5 @@
+## Append samples of your project ##
+resources:
+- firewall_v1alpha1_alias.yaml
+- firewall_v1alpha1_opnsenseconnection.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

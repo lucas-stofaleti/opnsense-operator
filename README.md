@@ -12,6 +12,35 @@
 - kubectl version v1.11.3+.
 - Access to a Kubernetes v1.11.3+ cluster.
 
+### Local OPNsense API environment
+
+Copy `.env.example` to `.env.local` or load the variables with `direnv`. Keep the
+real values local and never commit them.
+
+```sh
+cp .env.example .env.local
+set -a
+source .env.local
+set +a
+```
+
+These variables are used by `hack/opnsense-curl.sh` when verifying real OPNsense
+API behaviour before writing tests or implementation code.
+
+Examples:
+
+```sh
+hack/opnsense-curl.sh /api/firewall/alias/getAliasUUID/test
+
+hack/opnsense-curl.sh -X POST \
+  -d '{"alias":{"name":"test","type":"host","content":"192.0.2.10"}}' \
+  /api/firewall/alias/addItem
+```
+
+The helper also supports `--data-file`, `--stdin-body`, repeated `--header` and
+`--query` flags, `--write-status`, and raw curl pass-through arguments after
+`--`.
+
 ### To Deploy on the cluster
 **Build and push your image to the location specified by `IMG`:**
 
@@ -132,4 +161,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-

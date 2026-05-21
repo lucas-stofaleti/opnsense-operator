@@ -1,0 +1,17 @@
+apiVersion: firewall.opnsense.io/v1alpha1
+kind: Alias
+metadata:
+  labels:
+    app.kubernetes.io/name: opnsense-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: alias-sample
+spec:
+  connectionRef:
+    name: opnsenseconnection-sample
+  name: allow_dns
+  type: host
+  entries:
+    - 198.51.100.10
+    - 198.51.100.11
+  description: Example alias managed by the operator
+  enabled: true
