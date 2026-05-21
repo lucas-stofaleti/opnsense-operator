@@ -50,8 +50,8 @@ func statusServer(code int) *httptest.Server {
 }
 
 // opnsenseConnectionFixture builds an OPNsenseConnection CR pointing at the given URL
-// and referencing a Secret by name in the given namespace.
-func opnsenseConnectionFixture(name, url, secretName, secretNamespace string) *firewallv1alpha1.OPNsenseConnection {
+// and referencing a Secret by name in the "default" namespace.
+func opnsenseConnectionFixture(name, url, secretName string) *firewallv1alpha1.OPNsenseConnection {
 	return &firewallv1alpha1.OPNsenseConnection{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -61,19 +61,19 @@ func opnsenseConnectionFixture(name, url, secretName, secretNamespace string) *f
 			Credentials: firewallv1alpha1.CredentialsSpec{
 				SecretRef: firewallv1alpha1.SecretReference{
 					Name:      secretName,
-					Namespace: secretNamespace,
+					Namespace: "default",
 				},
 			},
 		},
 	}
 }
 
-// credentialsSecret builds a Secret holding OPNsense API credentials.
-func credentialsSecret(name, namespace, apiKey, apiSecret string) *corev1.Secret {
+// credentialsSecret builds a Secret holding OPNsense API credentials in the "default" namespace.
+func credentialsSecret(name, apiKey, apiSecret string) *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: "default",
 		},
 		Data: map[string][]byte{
 			"apiKey":    []byte(apiKey),
@@ -121,14 +121,14 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 			server = statusServer(http.StatusOK)
 
 			By("creating the credentials Secret")
-			secret := credentialsSecret(secretName, secretNS, "key", "secret")
+			secret := credentialsSecret(secretName, "key", "secret")
 			err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, &corev1.Secret{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 			}
 
 			By("creating the OPNsenseConnection CR")
-			conn := opnsenseConnectionFixture(connName, server.URL, secretName, secretNS)
+			conn := opnsenseConnectionFixture(connName, server.URL, secretName)
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: connName}, &firewallv1alpha1.OPNsenseConnection{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, conn)).To(Succeed())
@@ -175,7 +175,7 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 
 		BeforeEach(func() {
 			By("creating the OPNsenseConnection CR with a missing Secret reference")
-			conn := opnsenseConnectionFixture(connName, "http://irrelevant", "does-not-exist", "default")
+			conn := opnsenseConnectionFixture(connName, "http://irrelevant", "does-not-exist")
 			err := k8sClient.Get(ctx, types.NamespacedName{Name: connName}, &firewallv1alpha1.OPNsenseConnection{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, conn)).To(Succeed())
@@ -217,7 +217,7 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 			}
 
 			By("creating the OPNsenseConnection CR")
-			conn := opnsenseConnectionFixture(connName, "http://irrelevant", secretName, secretNS)
+			conn := opnsenseConnectionFixture(connName, "http://irrelevant", secretName)
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: connName}, &firewallv1alpha1.OPNsenseConnection{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, conn)).To(Succeed())
@@ -257,14 +257,14 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 			server = statusServer(http.StatusUnauthorized)
 
 			By("creating the credentials Secret with wrong credentials")
-			secret := credentialsSecret(secretName, secretNS, "wrongkey", "wrongsecret")
+			secret := credentialsSecret(secretName, "wrongkey", "wrongsecret")
 			err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, &corev1.Secret{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 			}
 
 			By("creating the OPNsenseConnection CR")
-			conn := opnsenseConnectionFixture(connName, server.URL, secretName, secretNS)
+			conn := opnsenseConnectionFixture(connName, server.URL, secretName)
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: connName}, &firewallv1alpha1.OPNsenseConnection{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, conn)).To(Succeed())
@@ -302,7 +302,7 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 
 		BeforeEach(func() {
 			By("creating the credentials Secret")
-			secret := credentialsSecret(secretName, secretNS, "key", "secret")
+			secret := credentialsSecret(secretName, "key", "secret")
 			err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, &corev1.Secret{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, secret)).To(Succeed())
@@ -310,7 +310,7 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 
 			By("creating the OPNsenseConnection CR pointing at a non-listening address")
 			// Use a URL that will produce a connection refused error.
-			conn := opnsenseConnectionFixture(connName, "http://127.0.0.1:1", secretName, secretNS)
+			conn := opnsenseConnectionFixture(connName, "http://127.0.0.1:1", secretName)
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: connName}, &firewallv1alpha1.OPNsenseConnection{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, conn)).To(Succeed())
@@ -353,7 +353,7 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 			}))
 
 			By("creating the credentials Secret")
-			secret := credentialsSecret(secretName, secretNS, "key", "secret")
+			secret := credentialsSecret(secretName, "key", "secret")
 			err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, &corev1.Secret{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, secret)).To(Succeed())
@@ -431,7 +431,7 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 			}
 
 			By("creating the credentials Secret")
-			secret := credentialsSecret(secretName, secretNS, "key", "secret")
+			secret := credentialsSecret(secretName, "key", "secret")
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, &corev1.Secret{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, secret)).To(Succeed())
@@ -491,7 +491,7 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 
 		BeforeEach(func() {
 			By("creating the credentials Secret")
-			secret := credentialsSecret(secretName, secretNS, "key", "secret")
+			secret := credentialsSecret(secretName, "key", "secret")
 			err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, &corev1.Secret{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, secret)).To(Succeed())
@@ -556,7 +556,7 @@ var _ = Describe("OPNsenseConnection Controller", func() {
 			}
 
 			By("creating the credentials Secret")
-			secret := credentialsSecret(secretName, secretNS, "key", "secret")
+			secret := credentialsSecret(secretName, "key", "secret")
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNS}, &corev1.Secret{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, secret)).To(Succeed())

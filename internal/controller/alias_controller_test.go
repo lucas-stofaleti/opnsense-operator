@@ -35,6 +35,12 @@ import (
 	firewallv1alpha1 "github.com/lucas-stofaleti/opnsense-operator/api/v1alpha1"
 )
 
+const (
+	statusOKBody     = `{"status":"ok"}`
+	statusFailedBody = `{"status":"failed"}`
+	resultErrorBody  = `{"result":"error"}`
+)
+
 var _ = Describe("Alias Controller", func() {
 	ctx := context.Background()
 
@@ -386,15 +392,15 @@ var _ = Describe("Alias Controller", func() {
 								w.Header().Set("Content-Type", "application/json")
 								switch {
 								case strings.HasPrefix(r.URL.Path, "/api/firewall/alias/getAliasUUID"):
-									fmt.Fprint(w, getAliasUUIDResponseBody)
+									_, _ = fmt.Fprint(w, getAliasUUIDResponseBody)
 								case r.URL.Path == "/api/firewall/alias/export":
-									fmt.Fprint(w, getAliasResponseBody)
+									_, _ = fmt.Fprint(w, getAliasResponseBody)
 								case r.Method == http.MethodPost && r.URL.Path == "/api/firewall/alias/addItem":
-									fmt.Fprint(w, createResponseBody)
+									_, _ = fmt.Fprint(w, createResponseBody)
 								case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/firewall/alias/setItem/"):
-									fmt.Fprint(w, updateResponseBody)
+									_, _ = fmt.Fprint(w, updateResponseBody)
 								case r.Method == http.MethodPost && r.URL.Path == "/api/firewall/alias/reconfigure":
-									fmt.Fprint(w, reconfigureResponseBody)
+									_, _ = fmt.Fprint(w, reconfigureResponseBody)
 								default:
 									w.WriteHeader(http.StatusNotFound)
 								}
@@ -424,7 +430,7 @@ var _ = Describe("Alias Controller", func() {
 							Context("and CreateAlias and ReconfigureAliases succeed", func() {
 								BeforeEach(func() {
 									createResponseBody = fmt.Sprintf(`{"result":"saved","uuid":%q}`, newAliasUUID)
-									reconfigureResponseBody = `{"status":"ok"}`
+									reconfigureResponseBody = statusOKBody
 								})
 
 								It("creates the alias and sets status.uuid, observedGeneration, and Ready=True", func() {
@@ -471,7 +477,7 @@ var _ = Describe("Alias Controller", func() {
 								BeforeEach(func() {
 									// "result":"error" is not "saved" and not "failed", so the client
 									// returns ErrUnexpectedResponse rather than ErrValidationFailed.
-									createResponseBody = `{"result":"error"}`
+									createResponseBody = resultErrorBody
 								})
 
 								It("sets Ready=False with CreateFailed reason", func() {
@@ -493,7 +499,7 @@ var _ = Describe("Alias Controller", func() {
 							Context("and CreateAlias succeeds but ReconfigureAliases fails", func() {
 								BeforeEach(func() {
 									createResponseBody = fmt.Sprintf(`{"result":"saved","uuid":%q}`, newAliasUUID)
-									reconfigureResponseBody = `{"status":"failed"}`
+									reconfigureResponseBody = statusFailedBody
 								})
 
 								It("sets Ready=False with ReconfigureFailed reason", func() {
@@ -518,7 +524,7 @@ var _ = Describe("Alias Controller", func() {
 
 							BeforeEach(func() {
 								getAliasUUIDResponseBody = fmt.Sprintf(`{"uuid":%q}`, existingAliasUUID)
-								reconfigureResponseBody = `{"status":"ok"}`
+								reconfigureResponseBody = statusOKBody
 							})
 
 							Context("and the spec matches the existing alias", func() {
@@ -528,7 +534,7 @@ var _ = Describe("Alias Controller", func() {
 									// when the field is omitted). If UpdateAlias were incorrectly called,
 									// updateResponseBody would fail, setting Ready=False — proving the no-op path is taken.
 									getAliasResponseBody = fmt.Sprintf(`{"aliases":{"alias":{%q:{"enabled":"1","name":"allow_dns","type":"host","content":"198.51.100.10","description":""}}}}`, existingAliasUUID)
-									updateResponseBody = `{"result":"error"}`
+									updateResponseBody = resultErrorBody
 								})
 
 								It("sets status.uuid and Ready=True without calling UpdateAlias", func() {
@@ -601,7 +607,7 @@ var _ = Describe("Alias Controller", func() {
 							Context("and UpdateAlias returns an unexpected error", func() {
 								BeforeEach(func() {
 									getAliasResponseBody = fmt.Sprintf(`{"aliases":{"alias":{%q:{"enabled":"0","name":"allow_dns","type":"host","content":"10.0.0.1","description":""}}}}`, existingAliasUUID)
-									updateResponseBody = `{"result":"error"}`
+									updateResponseBody = resultErrorBody
 								})
 
 								It("sets Ready=False with UpdateFailed reason", func() {
@@ -624,7 +630,7 @@ var _ = Describe("Alias Controller", func() {
 								BeforeEach(func() {
 									getAliasResponseBody = fmt.Sprintf(`{"aliases":{"alias":{%q:{"enabled":"0","name":"allow_dns","type":"host","content":"10.0.0.1","description":""}}}}`, existingAliasUUID)
 									updateResponseBody = `{"result":"saved"}`
-									reconfigureResponseBody = `{"status":"failed"}`
+									reconfigureResponseBody = statusFailedBody
 								})
 
 								It("sets Ready=False with ReconfigureFailed reason", func() {
@@ -756,7 +762,7 @@ var _ = Describe("Alias Controller", func() {
 		Context("When DeleteAlias succeeds and ReconfigureAliases succeeds", func() {
 			BeforeEach(func() {
 				deleteResponseBody = `{"result":"deleted"}`
-				reconfigureResponseBody = `{"status":"ok"}`
+				reconfigureResponseBody = statusOKBody
 			})
 
 			It("removes the finalizer and allows the object to be deleted", func() {
@@ -774,7 +780,7 @@ var _ = Describe("Alias Controller", func() {
 		Context("When DeleteAlias returns ErrAliasNotFound", func() {
 			BeforeEach(func() {
 				deleteResponseBody = `{"result":"not found"}`
-				reconfigureResponseBody = `{"status":"ok"}`
+				reconfigureResponseBody = statusOKBody
 			})
 
 			It("treats it as already deleted and removes the finalizer", func() {
@@ -813,7 +819,7 @@ var _ = Describe("Alias Controller", func() {
 		Context("When ReconfigureAliases fails", func() {
 			BeforeEach(func() {
 				deleteResponseBody = `{"result":"deleted"}`
-				reconfigureResponseBody = `{"status":"failed"}`
+				reconfigureResponseBody = statusFailedBody
 			})
 
 			It("sets Ready=False with ReconfigureFailed reason", func() {

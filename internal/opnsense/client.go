@@ -341,7 +341,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, payload any) (
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {

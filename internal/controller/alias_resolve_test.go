@@ -109,7 +109,7 @@ var _ = Describe("resolveExternalAlias", func() {
 		Context("and GetAlias returns the alias", func() {
 			BeforeEach(func() {
 				getAliasHandler = func(w http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(w, aliasFoundBody(staleUUID))
+					_, _ = fmt.Fprint(w, aliasFoundBody(staleUUID))
 				}
 			})
 
@@ -128,9 +128,9 @@ var _ = Describe("resolveExternalAlias", func() {
 				// Second GetAlias call (resolved UUID) → found.
 				getAliasHandler = func(w http.ResponseWriter, req *http.Request) {
 					if strings.Contains(req.URL.RawQuery, staleUUID) {
-						fmt.Fprint(w, aliasNotFoundBody)
+						_, _ = fmt.Fprint(w, aliasNotFoundBody)
 					} else {
-						fmt.Fprint(w, aliasFoundBody(resolvedUUID))
+						_, _ = fmt.Fprint(w, aliasFoundBody(resolvedUUID))
 					}
 				}
 			})
@@ -138,7 +138,7 @@ var _ = Describe("resolveExternalAlias", func() {
 			Context("and GetAliasUUIDByName finds the alias by name", func() {
 				BeforeEach(func() {
 					getAliasUUIDHandler = func(w http.ResponseWriter, _ *http.Request) {
-						fmt.Fprint(w, uuidFoundBody(resolvedUUID))
+						_, _ = fmt.Fprint(w, uuidFoundBody(resolvedUUID))
 					}
 				})
 
@@ -154,7 +154,7 @@ var _ = Describe("resolveExternalAlias", func() {
 			Context("and GetAliasUUIDByName returns not found", func() {
 				BeforeEach(func() {
 					getAliasUUIDHandler = func(w http.ResponseWriter, _ *http.Request) {
-						fmt.Fprint(w, uuidNotFoundBody)
+						_, _ = fmt.Fprint(w, uuidNotFoundBody)
 					}
 				})
 
@@ -171,7 +171,7 @@ var _ = Describe("resolveExternalAlias", func() {
 			BeforeEach(func() {
 				getAliasHandler = func(w http.ResponseWriter, _ *http.Request) {
 					w.WriteHeader(http.StatusInternalServerError)
-					fmt.Fprint(w, "internal error")
+					_, _ = fmt.Fprint(w, "internal error")
 				}
 			})
 
@@ -188,10 +188,10 @@ var _ = Describe("resolveExternalAlias", func() {
 		Context("and GetAliasUUIDByName finds the alias", func() {
 			BeforeEach(func() {
 				getAliasUUIDHandler = func(w http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(w, uuidFoundBody(resolvedUUID))
+					_, _ = fmt.Fprint(w, uuidFoundBody(resolvedUUID))
 				}
 				getAliasHandler = func(w http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(w, aliasFoundBody(resolvedUUID))
+					_, _ = fmt.Fprint(w, aliasFoundBody(resolvedUUID))
 				}
 			})
 
@@ -207,7 +207,7 @@ var _ = Describe("resolveExternalAlias", func() {
 		Context("and GetAliasUUIDByName returns not found", func() {
 			BeforeEach(func() {
 				getAliasUUIDHandler = func(w http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(w, uuidNotFoundBody)
+					_, _ = fmt.Fprint(w, uuidNotFoundBody)
 				}
 			})
 
@@ -223,7 +223,7 @@ var _ = Describe("resolveExternalAlias", func() {
 			BeforeEach(func() {
 				getAliasUUIDHandler = func(w http.ResponseWriter, _ *http.Request) {
 					w.WriteHeader(http.StatusInternalServerError)
-					fmt.Fprint(w, "internal error")
+					_, _ = fmt.Fprint(w, "internal error")
 				}
 			})
 

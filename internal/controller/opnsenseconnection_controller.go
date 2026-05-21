@@ -72,7 +72,7 @@ func (r *OPNsenseConnectionReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if apiKey == "" || apiSecret == "" {
 		return r.setReadyFailed(ctx, conn, "InvalidCredentials",
 			fmt.Sprintf("Secret %s/%s must have non-empty keys 'apiKey' and 'apiSecret'", secretKey.Namespace, secretKey.Name),
-			fmt.Errorf("Secret %s/%s is missing required credential keys", secretKey.Namespace, secretKey.Name))
+			fmt.Errorf("secret %s/%s is missing required credential keys", secretKey.Namespace, secretKey.Name))
 	}
 
 	// Build the HTTP client, optionally applying TLS configuration from the spec.
