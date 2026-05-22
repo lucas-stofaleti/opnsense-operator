@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Deny all permissions at workflow level; grant only what each job needs.
+permissions: {}
+
+# Cancel in-progress runs for the same workflow + ref, but never on main
+# to avoid interrupting post-merge checks.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check linter configuration
+        run: make lint-config
+
+      - name: Run linter
+        run: make lint
+
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify compilation
+        run: go build ./...
+
+  drift-check:
+    name: Drift Check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Regenerate manifests and code
+        run: make manifests generate
+
+      - name: Fail if generated files are out of sync
+        run: |
+          if ! git diff --exit-code; then
+            echo ""
+            echo "Generated files are out of sync with the source."
+            echo "Run 'make manifests generate' locally and commit the result."
+            exit 1
+          fi
+
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [lint, build, drift-check]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: |
+          go mod tidy
+          make test
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=cover.out \
+            | grep "^github.com/lucas-stofaleti/opnsense-operator/internal" \
+            | awk '{gsub(/%/, "", $3); sum += $3; count++} END {if (count > 0) printf "%.1f", sum/count; else print "0"}')
+          echo "Coverage (internal): ${COVERAGE}%"
+          if [ "$(echo "${COVERAGE} < 80" | bc)" -eq 1 ]; then
+            echo "Coverage ${COVERAGE}% is below the 80% threshold for ./internal/..."
+            exit 1
+          fi
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: [test]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install kind
+        run: |
+          curl -Lo ./kind "https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)"
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Verify kind installation
+        run: kind version
+
+      - name: Run e2e tests
+        run: |
+          go mod tidy
+          make test-e2e
