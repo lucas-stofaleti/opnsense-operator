@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	ErrAliasNotFound      = errors.New("opnsense alias not found")
-	ErrValidationFailed   = errors.New("opnsense validation failed")
-	ErrUnexpectedResponse = errors.New("unexpected opnsense response")
+	ErrAliasNotFound        = errors.New("opnsense alias not found")
+	ErrFirewallRuleNotFound = errors.New("opnsense firewall rule not found")
+	ErrValidationFailed     = errors.New("opnsense validation failed")
+	ErrUnexpectedResponse   = errors.New("unexpected opnsense response")
 )
 
 type Client struct {
@@ -32,6 +33,26 @@ type Alias struct {
 	Type        string
 	Content     string
 	Description string
+}
+
+// FirewallRule represents the operator-managed fields of an OPNsense filter rule.
+type FirewallRule struct {
+	Enabled         bool
+	Action          string // "pass", "block", "reject"
+	Interface       string // "" = floating, "lan"/"wan"/etc = interface rule
+	Direction       string // "in", "out", "any"
+	IPProtocol      string // "inet", "inet6", "inet46"
+	Protocol        string // "any", "TCP", "UDP", etc.
+	SourceNet       string
+	SourceNot       bool
+	SourcePort      string
+	DestinationNet  string
+	DestinationNot  bool
+	DestinationPort string
+	Sequence        string // stored as string in OPNsense
+	Log             bool
+	Quick           bool
+	Description     string // includes the managed suffix
 }
 
 type ValidationError struct {
@@ -263,6 +284,28 @@ func (c *Client) ReconfigureAliases(ctx context.Context) error {
 	return nil
 }
 
+func (c *Client) CreateRule(ctx context.Context, rule FirewallRule) (string, error) {
+	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/addRule", firewallRuleRequest{
+		Rule: encodeFirewallRule(rule),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	response, err := decodeResultResponse(body)
+	if err != nil {
+		return "", err
+	}
+	if err := response.resultError("saved"); err != nil {
+		return "", err
+	}
+	if response.UUID == "" {
+		return "", fmt.Errorf("%w: create rule response did not contain a uuid", ErrUnexpectedResponse)
+	}
+
+	return response.UUID, nil
+}
+
 type aliasRequest struct {
 	Alias aliasPayload `json:"alias"`
 }
@@ -287,6 +330,59 @@ func encodeAlias(alias Alias) aliasPayload {
 		Type:        alias.Type,
 		Content:     alias.Content,
 		Description: alias.Description,
+	}
+}
+
+type firewallRuleRequest struct {
+	Rule firewallRulePayload `json:"rule"`
+}
+
+type firewallRulePayload struct {
+	Enabled         string `json:"enabled"`
+	Action          string `json:"action"`
+	Interface       string `json:"interface"`
+	Direction       string `json:"direction"`
+	IPProtocol      string `json:"ipprotocol"`
+	Protocol        string `json:"protocol"`
+	SourceNet       string `json:"source_net"`
+	SourceNot       string `json:"source_not"`
+	SourcePort      string `json:"source_port"`
+	DestinationNet  string `json:"destination_net"`
+	DestinationNot  string `json:"destination_not"`
+	DestinationPort string `json:"destination_port"`
+	// OPNsense treats an explicitly empty sequence as a validation error;
+	// omitempty causes the field to be omitted when blank so OPNsense auto-assigns.
+	Sequence    string `json:"sequence,omitempty"`
+	Log         string `json:"log"`
+	Quick       string `json:"quick"`
+	Description string `json:"description"`
+}
+
+func boolToStr(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
+func encodeFirewallRule(rule FirewallRule) firewallRulePayload {
+	return firewallRulePayload{
+		Enabled:         boolToStr(rule.Enabled),
+		Action:          rule.Action,
+		Interface:       rule.Interface,
+		Direction:       rule.Direction,
+		IPProtocol:      rule.IPProtocol,
+		Protocol:        rule.Protocol,
+		SourceNet:       rule.SourceNet,
+		SourceNot:       boolToStr(rule.SourceNot),
+		SourcePort:      rule.SourcePort,
+		DestinationNet:  rule.DestinationNet,
+		DestinationNot:  boolToStr(rule.DestinationNot),
+		DestinationPort: rule.DestinationPort,
+		Sequence:        rule.Sequence,
+		Log:             boolToStr(rule.Log),
+		Quick:           boolToStr(rule.Quick),
+		Description:     rule.Description,
 	}
 }
 
