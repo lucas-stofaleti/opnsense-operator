@@ -523,6 +523,110 @@ func TestSearchRuleByManagedSuffixTransportError(t *testing.T) {
 	}
 }
 
+func TestUpdateRule(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh -X POST -d '{"rule":{"description":"Updated [opnsense-operator:default/allow-https]"}}' /api/firewall/filter/setRule/eb3c7d1b-4348-4b93-8a94-1efabf9225d2
+	// Real response:
+	//   {"result":"saved"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST request, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/firewall/filter/setRule/eb3c7d1b-4348-4b93-8a94-1efabf9225d2" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+
+		writeJSON(t, w, http.StatusOK, map[string]string{
+			"result": "saved",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	err := client.UpdateRule(context.Background(), "eb3c7d1b-4348-4b93-8a94-1efabf9225d2", FirewallRule{
+		Action:      "pass",
+		Description: "Updated [opnsense-operator:default/allow-https]",
+	})
+	if err != nil {
+		t.Fatalf("UpdateRule returned error: %v", err)
+	}
+}
+
+func TestUpdateRuleNotFound(t *testing.T) {
+	t.Parallel()
+
+	// setRule not-found behaviour is undocumented in the evidence file — it was not
+	// explicitly tested with a missing UUID. As a safe fallback, any result that is
+	// neither "saved" nor "failed" is treated as ErrUnexpectedResponse.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]string{
+			"result": "not found",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	err := client.UpdateRule(context.Background(), "11111111-2222-3333-4444-555555555555", FirewallRule{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrUnexpectedResponse) {
+		t.Fatalf("expected ErrUnexpectedResponse, got %v", err)
+	}
+}
+
+func TestUpdateRuleValidationError(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh -X POST -d '{"rule":{"action":"invalid"}}' /api/firewall/filter/setRule/eb3c7d1b-4348-4b93-8a94-1efabf9225d2
+	// Real response:
+	//   {"result":"failed","validations":{"rule.action":"Option [invalid] not in list."}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"result": "failed",
+			"validations": map[string]string{
+				"rule.action": "Option [invalid] not in list.",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	err := client.UpdateRule(context.Background(), "eb3c7d1b-4348-4b93-8a94-1efabf9225d2", FirewallRule{Action: "invalid"})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+
+	var validationErr *ValidationError
+	if !AsValidationError(err, &validationErr) {
+		t.Fatalf("expected *ValidationError, got %T: %v", err, err)
+	}
+	if validationErr.FieldErrors["rule.action"] != "Option [invalid] not in list." {
+		t.Fatalf("unexpected field errors: %#v", validationErr.FieldErrors)
+	}
+}
+
+func TestUpdateRuleTransportError(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient("http://example.com", testAPIKey, testAPISecret, &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return nil, errors.New("dial failed")
+		}),
+	})
+
+	err := client.UpdateRule(context.Background(), "eb3c7d1b-4348-4b93-8a94-1efabf9225d2", FirewallRule{})
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+}
+
 // decodeBody is a test helper that decodes the JSON request body into v.
 func decodeBody(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)

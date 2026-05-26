@@ -387,6 +387,22 @@ func (c *Client) SearchRuleByManagedSuffix(ctx context.Context, suffix string) (
 	return uuids, nil
 }
 
+func (c *Client) UpdateRule(ctx context.Context, uuid string, rule FirewallRule) error {
+	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/setRule/"+uuid, firewallRuleRequest{
+		Rule: encodeFirewallRule(rule),
+	})
+	if err != nil {
+		return err
+	}
+
+	response, err := decodeResultResponse(body)
+	if err != nil {
+		return err
+	}
+
+	return response.resultError("saved")
+}
+
 func (c *Client) CreateRule(ctx context.Context, rule FirewallRule) (string, error) {
 	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/addRule", firewallRuleRequest{
 		Rule: encodeFirewallRule(rule),

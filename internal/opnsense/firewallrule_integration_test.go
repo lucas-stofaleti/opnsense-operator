@@ -250,3 +250,81 @@ func TestSearchRuleByManagedSuffixIntegration(t *testing.T) {
 		t.Fatalf("apply returned error: %v", err)
 	}
 }
+
+func TestUpdateRuleIntegration(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh -X POST -d '{"rule":{"destination_net":"10.0.0.0/8","destination_port":"8080","description":"ci-update-<ts>-updated [opnsense-operator:default/ci-update-test]"}}' /api/firewall/filter/setRule/<uuid>
+	//   hack/opnsense-curl.sh /api/firewall/filter/getRule/<uuid>
+	// Real response: {"result":"saved"}; getRule returns updated fields
+	client := newIntegrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	ts := time.Now().UTC().Format("150405")
+	initial := FirewallRule{
+		Enabled:         true,
+		Action:          "pass",
+		Direction:       "in",
+		IPProtocol:      "inet",
+		Protocol:        "TCP",
+		SourceNet:       "any",
+		DestinationNet:  "192.168.1.0/24",
+		DestinationPort: "443",
+		Quick:           true,
+		Description:     "ci-update-" + ts + " [opnsense-operator:default/ci-update-test]",
+	}
+
+	uuid, err := client.CreateRule(ctx, initial)
+	if err != nil {
+		t.Fatalf("CreateRule returned error: %v", err)
+	}
+
+	deleted := false
+	defer func() {
+		if deleted {
+			return
+		}
+
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+
+		if _, err := client.doJSON(cleanupCtx, http.MethodPost, "/api/firewall/filter/delRule/"+uuid, map[string]string{}); err == nil {
+			_, _ = client.doJSON(cleanupCtx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{})
+		}
+	}()
+
+	updated := initial
+	updated.DestinationNet = "10.0.0.0/8"
+	updated.DestinationPort = "8080"
+	updated.Description = "ci-update-" + ts + "-updated [opnsense-operator:default/ci-update-test]"
+
+	if err := client.UpdateRule(ctx, uuid, updated); err != nil {
+		t.Fatalf("UpdateRule returned error: %v", err)
+	}
+
+	got, err := client.GetRule(ctx, uuid)
+	if err != nil {
+		t.Fatalf("GetRule after UpdateRule returned error: %v", err)
+	}
+
+	if got.DestinationNet != updated.DestinationNet {
+		t.Errorf("DestinationNet: got %q, want %q", got.DestinationNet, updated.DestinationNet)
+	}
+	if got.DestinationPort != updated.DestinationPort {
+		t.Errorf("DestinationPort: got %q, want %q", got.DestinationPort, updated.DestinationPort)
+	}
+	if got.Description != updated.Description {
+		t.Errorf("Description: got %q, want %q", got.Description, updated.Description)
+	}
+
+	if _, err := client.doJSON(ctx, http.MethodPost, "/api/firewall/filter/delRule/"+uuid, map[string]string{}); err != nil {
+		t.Fatalf("delete rule returned error: %v", err)
+	}
+	deleted = true
+
+	if _, err := client.doJSON(ctx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{}); err != nil {
+		t.Fatalf("apply returned error: %v", err)
+	}
+}
