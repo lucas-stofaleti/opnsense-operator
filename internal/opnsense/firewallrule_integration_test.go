@@ -71,3 +71,113 @@ func TestCreateRuleIntegration(t *testing.T) {
 		t.Fatalf("apply returned error: %v", err)
 	}
 }
+
+func TestGetRuleIntegration(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh -X POST -d '{"rule":{"enabled":"1","action":"pass","interface":"lan","direction":"in","ipprotocol":"inet","protocol":"TCP","source_net":"any","destination_net":"192.168.1.0/24","destination_port":"443","quick":"1","description":"ci-get-<timestamp> [opnsense-operator:default/ci-get-test]"}}' /api/firewall/filter/addRule
+	//   hack/opnsense-curl.sh /api/firewall/filter/getRule/<uuid>
+	// Real response: full rule model with select fields
+	client := newIntegrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	suffix := "ci-get-" + time.Now().UTC().Format("150405")
+	want := FirewallRule{
+		Enabled:         true,
+		Action:          "pass",
+		Interface:       "lan",
+		Direction:       "in",
+		IPProtocol:      "inet",
+		Protocol:        "TCP",
+		SourceNet:       "any",
+		SourceNot:       false,
+		SourcePort:      "",
+		DestinationNet:  "192.168.1.0/24",
+		DestinationNot:  false,
+		DestinationPort: "443",
+		Log:             false,
+		Quick:           true,
+		Description:     suffix + " [opnsense-operator:default/ci-get-test]",
+	}
+
+	uuid, err := client.CreateRule(ctx, want)
+	if err != nil {
+		t.Fatalf("CreateRule returned error: %v", err)
+	}
+
+	deleted := false
+	defer func() {
+		if deleted {
+			return
+		}
+
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+
+		if _, err := client.doJSON(cleanupCtx, http.MethodPost, "/api/firewall/filter/delRule/"+uuid, map[string]string{}); err == nil {
+			_, _ = client.doJSON(cleanupCtx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{})
+		}
+	}()
+
+	got, err := client.GetRule(ctx, uuid)
+	if err != nil {
+		t.Fatalf("GetRule returned error: %v", err)
+	}
+
+	if got.Enabled != want.Enabled {
+		t.Errorf("Enabled: got %v, want %v", got.Enabled, want.Enabled)
+	}
+	if got.Action != want.Action {
+		t.Errorf("Action: got %q, want %q", got.Action, want.Action)
+	}
+	if got.Interface != want.Interface {
+		t.Errorf("Interface: got %q, want %q", got.Interface, want.Interface)
+	}
+	if got.Direction != want.Direction {
+		t.Errorf("Direction: got %q, want %q", got.Direction, want.Direction)
+	}
+	if got.IPProtocol != want.IPProtocol {
+		t.Errorf("IPProtocol: got %q, want %q", got.IPProtocol, want.IPProtocol)
+	}
+	if got.Protocol != want.Protocol {
+		t.Errorf("Protocol: got %q, want %q", got.Protocol, want.Protocol)
+	}
+	if got.SourceNet != want.SourceNet {
+		t.Errorf("SourceNet: got %q, want %q", got.SourceNet, want.SourceNet)
+	}
+	if got.SourceNot != want.SourceNot {
+		t.Errorf("SourceNot: got %v, want %v", got.SourceNot, want.SourceNot)
+	}
+	if got.SourcePort != want.SourcePort {
+		t.Errorf("SourcePort: got %q, want %q", got.SourcePort, want.SourcePort)
+	}
+	if got.DestinationNet != want.DestinationNet {
+		t.Errorf("DestinationNet: got %q, want %q", got.DestinationNet, want.DestinationNet)
+	}
+	if got.DestinationNot != want.DestinationNot {
+		t.Errorf("DestinationNot: got %v, want %v", got.DestinationNot, want.DestinationNot)
+	}
+	if got.DestinationPort != want.DestinationPort {
+		t.Errorf("DestinationPort: got %q, want %q", got.DestinationPort, want.DestinationPort)
+	}
+	if got.Log != want.Log {
+		t.Errorf("Log: got %v, want %v", got.Log, want.Log)
+	}
+	if got.Quick != want.Quick {
+		t.Errorf("Quick: got %v, want %v", got.Quick, want.Quick)
+	}
+	if got.Description != want.Description {
+		t.Errorf("Description: got %q, want %q", got.Description, want.Description)
+	}
+
+	if _, err := client.doJSON(ctx, http.MethodPost, "/api/firewall/filter/delRule/"+uuid, map[string]string{}); err != nil {
+		t.Fatalf("delete rule returned error: %v", err)
+	}
+	deleted = true
+
+	if _, err := client.doJSON(ctx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{}); err != nil {
+		t.Fatalf("apply returned error: %v", err)
+	}
+}

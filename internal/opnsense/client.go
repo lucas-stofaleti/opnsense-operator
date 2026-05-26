@@ -284,6 +284,86 @@ func (c *Client) ReconfigureAliases(ctx context.Context) error {
 	return nil
 }
 
+// getRuleResponse is the internal decode struct for getRule/{uuid} responses.
+// Select fields (action, interface, direction, ipprotocol, protocol) are returned
+// as maps of option-key → {value, selected} objects; flat fields are plain strings.
+type getRuleResponse struct {
+	Rule struct {
+		Enabled         string                        `json:"enabled"`
+		Sequence        string                        `json:"sequence"`
+		Action          map[string]getRuleSelectEntry `json:"action"`
+		Interface       map[string]getRuleSelectEntry `json:"interface"`
+		Direction       map[string]getRuleSelectEntry `json:"direction"`
+		IPProtocol      map[string]getRuleSelectEntry `json:"ipprotocol"`
+		Protocol        map[string]getRuleSelectEntry `json:"protocol"`
+		SourceNet       string                        `json:"source_net"`
+		SourceNot       string                        `json:"source_not"`
+		SourcePort      string                        `json:"source_port"`
+		DestinationNet  string                        `json:"destination_net"`
+		DestinationNot  string                        `json:"destination_not"`
+		DestinationPort string                        `json:"destination_port"`
+		Log             string                        `json:"log"`
+		Quick           string                        `json:"quick"`
+		Description     string                        `json:"description"`
+	} `json:"rule"`
+}
+
+type getRuleSelectEntry struct {
+	Value    string `json:"value"`
+	Selected int    `json:"selected"`
+}
+
+// selectedKey returns the map key whose Selected field is 1, or "" if none is selected.
+func selectedKey(m map[string]getRuleSelectEntry) string {
+	for k, v := range m {
+		if v.Selected == 1 {
+			return k
+		}
+	}
+	return ""
+}
+
+func (c *Client) GetRule(ctx context.Context, uuid string) (FirewallRule, error) {
+	body, err := c.doJSON(ctx, http.MethodGet, "/api/firewall/filter/getRule/"+uuid, nil)
+	if err != nil {
+		return FirewallRule{}, err
+	}
+
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		return FirewallRule{}, ErrFirewallRuleNotFound
+	}
+
+	var response getRuleResponse
+	if err := json.Unmarshal(trimmed, &response); err != nil {
+		return FirewallRule{}, fmt.Errorf("decode get rule response: %w", err)
+	}
+
+	r := response.Rule
+	if r.Action == nil && r.Direction == nil {
+		return FirewallRule{}, fmt.Errorf("%w: get rule response did not contain rule data", ErrUnexpectedResponse)
+	}
+
+	return FirewallRule{
+		Enabled:         r.Enabled == "1",
+		Action:          selectedKey(r.Action),
+		Interface:       selectedKey(r.Interface),
+		Direction:       selectedKey(r.Direction),
+		IPProtocol:      selectedKey(r.IPProtocol),
+		Protocol:        selectedKey(r.Protocol),
+		SourceNet:       r.SourceNet,
+		SourceNot:       r.SourceNot == "1",
+		SourcePort:      r.SourcePort,
+		DestinationNet:  r.DestinationNet,
+		DestinationNot:  r.DestinationNot == "1",
+		DestinationPort: r.DestinationPort,
+		Sequence:        r.Sequence,
+		Log:             r.Log == "1",
+		Quick:           r.Quick == "1",
+		Description:     r.Description,
+	}, nil
+}
+
 func (c *Client) CreateRule(ctx context.Context, rule FirewallRule) (string, error) {
 	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/addRule", firewallRuleRequest{
 		Rule: encodeFirewallRule(rule),

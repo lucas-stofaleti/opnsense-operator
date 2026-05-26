@@ -220,6 +220,184 @@ func TestCreateRuleOmitsEmptySequence(t *testing.T) {
 	}
 }
 
+func TestGetRule(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh /api/firewall/filter/getRule/eb3c7d1b-4348-4b93-8a94-1efabf9225d2
+	// Real response (abbreviated):
+	//   {"rule":{"enabled":"1","sequence":"2500","action":{"pass":{"value":"Pass","selected":1},...},
+	//   "interface":{"lan":{"value":"LAN","selected":1},...},"direction":{"in":{"value":"In","selected":1},...},
+	//   "ipprotocol":{"inet":{"value":"IPv4","selected":1},...},"protocol":{"TCP":{"value":"TCP","selected":1},...},
+	//   "source_net":"any","source_not":"0","source_port":"","destination_net":"192.168.1.0/24",
+	//   "destination_not":"0","destination_port":"443","log":"0","quick":"1",
+	//   "description":"Allow HTTPS [opnsense-operator:default/allow-https]"}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET request, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/firewall/filter/getRule/eb3c7d1b-4348-4b93-8a94-1efabf9225d2" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"rule": map[string]any{
+				"enabled":  "1",
+				"sequence": "2500",
+				"action": map[string]any{
+					"pass":   map[string]any{"value": "Pass", "selected": 1},
+					"block":  map[string]any{"value": "Block", "selected": 0},
+					"reject": map[string]any{"value": "Reject", "selected": 0},
+				},
+				"interface": map[string]any{
+					"lan": map[string]any{"value": "LAN", "selected": 1},
+					"wan": map[string]any{"value": "WAN", "selected": 0},
+				},
+				"direction": map[string]any{
+					"in":  map[string]any{"value": "In", "selected": 1},
+					"out": map[string]any{"value": "Out", "selected": 0},
+					"any": map[string]any{"value": "Both", "selected": 0},
+				},
+				"ipprotocol": map[string]any{
+					"inet":   map[string]any{"value": "IPv4", "selected": 1},
+					"inet6":  map[string]any{"value": "IPv6", "selected": 0},
+					"inet46": map[string]any{"value": "IPv4+IPv6", "selected": 0},
+				},
+				"protocol": map[string]any{
+					"any": map[string]any{"value": "any", "selected": 0},
+					"TCP": map[string]any{"value": "TCP", "selected": 1},
+					"UDP": map[string]any{"value": "UDP", "selected": 0},
+				},
+				"source_net":       "any",
+				"source_not":       "0",
+				"source_port":      "",
+				"destination_net":  "192.168.1.0/24",
+				"destination_not":  "0",
+				"destination_port": "443",
+				"log":              "0",
+				"quick":            "1",
+				"description":      "Allow HTTPS [opnsense-operator:default/allow-https]",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	rule, err := client.GetRule(context.Background(), "eb3c7d1b-4348-4b93-8a94-1efabf9225d2")
+	if err != nil {
+		t.Fatalf("GetRule returned error: %v", err)
+	}
+
+	if !rule.Enabled {
+		t.Error("expected Enabled=true")
+	}
+	if rule.Action != "pass" {
+		t.Errorf("expected Action=%q, got %q", "pass", rule.Action)
+	}
+	if rule.Interface != "lan" {
+		t.Errorf("expected Interface=%q, got %q", "lan", rule.Interface)
+	}
+	if rule.Direction != "in" {
+		t.Errorf("expected Direction=%q, got %q", "in", rule.Direction)
+	}
+	if rule.IPProtocol != "inet" {
+		t.Errorf("expected IPProtocol=%q, got %q", "inet", rule.IPProtocol)
+	}
+	if rule.Protocol != "TCP" {
+		t.Errorf("expected Protocol=%q, got %q", "TCP", rule.Protocol)
+	}
+	if rule.SourceNet != "any" {
+		t.Errorf("expected SourceNet=%q, got %q", "any", rule.SourceNet)
+	}
+	if rule.SourceNot {
+		t.Error("expected SourceNot=false")
+	}
+	if rule.SourcePort != "" {
+		t.Errorf("expected SourcePort=%q, got %q", "", rule.SourcePort)
+	}
+	if rule.DestinationNet != "192.168.1.0/24" {
+		t.Errorf("expected DestinationNet=%q, got %q", "192.168.1.0/24", rule.DestinationNet)
+	}
+	if rule.DestinationNot {
+		t.Error("expected DestinationNot=false")
+	}
+	if rule.DestinationPort != "443" {
+		t.Errorf("expected DestinationPort=%q, got %q", "443", rule.DestinationPort)
+	}
+	if rule.Sequence != "2500" {
+		t.Errorf("expected Sequence=%q, got %q", "2500", rule.Sequence)
+	}
+	if rule.Log {
+		t.Error("expected Log=false")
+	}
+	if !rule.Quick {
+		t.Error("expected Quick=true")
+	}
+	if rule.Description != "Allow HTTPS [opnsense-operator:default/allow-https]" {
+		t.Errorf("expected Description to match, got %q", rule.Description)
+	}
+}
+
+func TestGetRuleNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh /api/firewall/filter/getRule/11111111-2222-3333-4444-555555555555
+	// Real response:
+	//   []
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	_, err := client.GetRule(context.Background(), "11111111-2222-3333-4444-555555555555")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrFirewallRuleNotFound) {
+		t.Fatalf("expected ErrFirewallRuleNotFound, got %v", err)
+	}
+}
+
+func TestGetRuleUnexpectedResponseEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Mock returns an empty object {} — not an array and not a valid rule.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	_, err := client.GetRule(context.Background(), "11111111-2222-3333-4444-555555555555")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrUnexpectedResponse) {
+		t.Fatalf("expected ErrUnexpectedResponse, got %v", err)
+	}
+}
+
+func TestGetRuleTransportError(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient("http://example.com", testAPIKey, testAPISecret, &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return nil, errors.New("dial failed")
+		}),
+	})
+
+	_, err := client.GetRule(context.Background(), "eb3c7d1b-4348-4b93-8a94-1efabf9225d2")
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+}
+
 // decodeBody is a test helper that decodes the JSON request body into v.
 func decodeBody(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
