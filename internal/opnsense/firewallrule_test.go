@@ -398,6 +398,131 @@ func TestGetRuleTransportError(t *testing.T) {
 	}
 }
 
+func TestSearchRuleByManagedSuffixFound(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh '/api/firewall/filter/searchRule?searchPhrase=default/allow-https'
+	// Real response:
+	//   {"total":1,"rowCount":1,"current":1,"rows":[{"uuid":"eb3c7d1b-4348-4b93-8a94-1efabf9225d2","enabled":"1","sequence":"2500","action":"pass","interface":"","direction":"in","ipprotocol":"inet","protocol":"any","source_net":"any","source_not":"0","source_port":"","destination_net":"any","destination_not":"0","destination_port":"","quick":"1","log":"0","description":"Allow HTTPS [opnsense-operator:default/allow-https]"}]}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET request, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/firewall/filter/searchRule" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("searchPhrase"); got != "default/allow-https" {
+			t.Fatalf("expected searchPhrase=%q, got %q", "default/allow-https", got)
+		}
+
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"total":    1,
+			"rowCount": 1,
+			"current":  1,
+			"rows": []map[string]any{
+				{
+					"uuid":        "eb3c7d1b-4348-4b93-8a94-1efabf9225d2",
+					"description": "Allow HTTPS [opnsense-operator:default/allow-https]",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	uuids, err := client.SearchRuleByManagedSuffix(context.Background(), "default/allow-https")
+	if err != nil {
+		t.Fatalf("SearchRuleByManagedSuffix returned error: %v", err)
+	}
+	if len(uuids) != 1 {
+		t.Fatalf("expected 1 UUID, got %d", len(uuids))
+	}
+	if uuids[0] != "eb3c7d1b-4348-4b93-8a94-1efabf9225d2" {
+		t.Fatalf("expected uuid %q, got %q", "eb3c7d1b-4348-4b93-8a94-1efabf9225d2", uuids[0])
+	}
+}
+
+func TestSearchRuleByManagedSuffixNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh '/api/firewall/filter/searchRule?searchPhrase=default/nonexistent'
+	// Real response:
+	//   {"total":0,"rowCount":0,"current":1,"rows":[]}
+	// Note: empty result is NOT an error — the caller decides what to do with 0 results.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"total":    0,
+			"rowCount": 0,
+			"current":  1,
+			"rows":     []any{},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	uuids, err := client.SearchRuleByManagedSuffix(context.Background(), "default/nonexistent")
+	if err != nil {
+		t.Fatalf("expected no error for empty result, got %v", err)
+	}
+	if len(uuids) != 0 {
+		t.Fatalf("expected empty slice, got %v", uuids)
+	}
+}
+
+func TestSearchRuleByManagedSuffixMultiple(t *testing.T) {
+	t.Parallel()
+
+	// OPNsense uses a substring match, so multiple rules can share the same suffix.
+	// The caller is responsible for handling the ambiguous N>1 case.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"total":    2,
+			"rowCount": 2,
+			"current":  1,
+			"rows": []map[string]any{
+				{"uuid": "aaaaaaaa-0000-0000-0000-000000000001", "description": "Rule A [opnsense-operator:default/allow-https]"},
+				{"uuid": "bbbbbbbb-0000-0000-0000-000000000002", "description": "Rule B [opnsense-operator:default/allow-https]"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	uuids, err := client.SearchRuleByManagedSuffix(context.Background(), "default/allow-https")
+	if err != nil {
+		t.Fatalf("SearchRuleByManagedSuffix returned error: %v", err)
+	}
+	if len(uuids) != 2 {
+		t.Fatalf("expected 2 UUIDs, got %d", len(uuids))
+	}
+	if uuids[0] != "aaaaaaaa-0000-0000-0000-000000000001" {
+		t.Errorf("expected first uuid %q, got %q", "aaaaaaaa-0000-0000-0000-000000000001", uuids[0])
+	}
+	if uuids[1] != "bbbbbbbb-0000-0000-0000-000000000002" {
+		t.Errorf("expected second uuid %q, got %q", "bbbbbbbb-0000-0000-0000-000000000002", uuids[1])
+	}
+}
+
+func TestSearchRuleByManagedSuffixTransportError(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient("http://example.com", testAPIKey, testAPISecret, &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return nil, errors.New("dial failed")
+		}),
+	})
+
+	_, err := client.SearchRuleByManagedSuffix(context.Background(), "default/allow-https")
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+}
+
 // decodeBody is a test helper that decodes the JSON request body into v.
 func decodeBody(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)

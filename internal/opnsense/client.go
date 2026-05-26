@@ -364,6 +364,29 @@ func (c *Client) GetRule(ctx context.Context, uuid string) (FirewallRule, error)
 	}, nil
 }
 
+func (c *Client) SearchRuleByManagedSuffix(ctx context.Context, suffix string) ([]string, error) {
+	body, err := c.doJSON(ctx, http.MethodGet, "/api/firewall/filter/searchRule?searchPhrase="+url.QueryEscape(suffix), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Rows []struct {
+			UUID string `json:"uuid"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("decode search rule response: %w", err)
+	}
+
+	uuids := make([]string, 0, len(response.Rows))
+	for _, row := range response.Rows {
+		uuids = append(uuids, row.UUID)
+	}
+
+	return uuids, nil
+}
+
 func (c *Client) CreateRule(ctx context.Context, rule FirewallRule) (string, error) {
 	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/addRule", firewallRuleRequest{
 		Rule: encodeFirewallRule(rule),

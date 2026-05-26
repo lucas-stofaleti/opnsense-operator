@@ -181,3 +181,72 @@ func TestGetRuleIntegration(t *testing.T) {
 		t.Fatalf("apply returned error: %v", err)
 	}
 }
+
+func TestSearchRuleByManagedSuffixIntegration(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh '/api/firewall/filter/searchRule?searchPhrase=default/ci-search-test'
+	// Real response:
+	//   {"total":1,"rowCount":1,"current":1,"rows":[{"uuid":"<uuid>","description":"ci-search-<ts> [opnsense-operator:default/ci-search-test]",...}]}
+	client := newIntegrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	suffix := "ci-search-" + time.Now().UTC().Format("150405")
+	description := suffix + " [opnsense-operator:default/ci-search-test]"
+
+	uuid, err := client.CreateRule(ctx, FirewallRule{
+		Enabled:        true,
+		Action:         "pass",
+		Direction:      "in",
+		IPProtocol:     "inet",
+		Protocol:       "any",
+		SourceNet:      "any",
+		DestinationNet: "any",
+		Quick:          true,
+		Description:    description,
+	})
+	if err != nil {
+		t.Fatalf("CreateRule returned error: %v", err)
+	}
+
+	deleted := false
+	defer func() {
+		if deleted {
+			return
+		}
+
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+
+		if _, err := client.doJSON(cleanupCtx, http.MethodPost, "/api/firewall/filter/delRule/"+uuid, map[string]string{}); err == nil {
+			_, _ = client.doJSON(cleanupCtx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{})
+		}
+	}()
+
+	uuids, err := client.SearchRuleByManagedSuffix(ctx, "default/ci-search-test")
+	if err != nil {
+		t.Fatalf("SearchRuleByManagedSuffix returned error: %v", err)
+	}
+
+	found := false
+	for _, u := range uuids {
+		if u == uuid {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected UUID %q in search results %v", uuid, uuids)
+	}
+
+	if _, err := client.doJSON(ctx, http.MethodPost, "/api/firewall/filter/delRule/"+uuid, map[string]string{}); err != nil {
+		t.Fatalf("delete rule returned error: %v", err)
+	}
+	deleted = true
+
+	if _, err := client.doJSON(ctx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{}); err != nil {
+		t.Fatalf("apply returned error: %v", err)
+	}
+}
