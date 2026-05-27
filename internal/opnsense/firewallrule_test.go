@@ -627,6 +627,96 @@ func TestUpdateRuleTransportError(t *testing.T) {
 	}
 }
 
+func TestDeleteRule(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh -X POST -d '{}' /api/firewall/filter/delRule/eb3c7d1b-4348-4b93-8a94-1efabf9225d2
+	// Real response:
+	//   {"result":"deleted"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST request, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/firewall/filter/delRule/eb3c7d1b-4348-4b93-8a94-1efabf9225d2" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+
+		writeJSON(t, w, http.StatusOK, map[string]string{
+			"result": "deleted",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	err := client.DeleteRule(context.Background(), "eb3c7d1b-4348-4b93-8a94-1efabf9225d2")
+	if err != nil {
+		t.Fatalf("DeleteRule returned error: %v", err)
+	}
+}
+
+func TestDeleteRuleNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh -X POST -d '{}' /api/firewall/filter/delRule/11111111-2222-3333-4444-555555555555
+	// Real response:
+	//   {"result":"not found"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]string{
+			"result": "not found",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	err := client.DeleteRule(context.Background(), "11111111-2222-3333-4444-555555555555")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrFirewallRuleNotFound) {
+		t.Fatalf("expected ErrFirewallRuleNotFound, got %v", err)
+	}
+}
+
+func TestDeleteRuleUnexpectedResult(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]string{
+			"result": "something else",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	err := client.DeleteRule(context.Background(), "eb3c7d1b-4348-4b93-8a94-1efabf9225d2")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrUnexpectedResponse) {
+		t.Fatalf("expected ErrUnexpectedResponse, got %v", err)
+	}
+}
+
+func TestDeleteRuleTransportError(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient("http://example.com", testAPIKey, testAPISecret, &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return nil, errors.New("dial failed")
+		}),
+	})
+
+	err := client.DeleteRule(context.Background(), "eb3c7d1b-4348-4b93-8a94-1efabf9225d2")
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+}
+
 // decodeBody is a test helper that decodes the JSON request body into v.
 func decodeBody(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)

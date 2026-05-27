@@ -387,6 +387,29 @@ func (c *Client) SearchRuleByManagedSuffix(ctx context.Context, suffix string) (
 	return uuids, nil
 }
 
+func (c *Client) DeleteRule(ctx context.Context, uuid string) error {
+	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/delRule/"+uuid, map[string]string{})
+	if err != nil {
+		return err
+	}
+
+	var response struct {
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return fmt.Errorf("decode delete rule response: %w", err)
+	}
+
+	switch response.Result {
+	case "deleted":
+		return nil
+	case "not found":
+		return ErrFirewallRuleNotFound
+	default:
+		return fmt.Errorf("%w: delete rule returned unexpected result %q", ErrUnexpectedResponse, response.Result)
+	}
+}
+
 func (c *Client) UpdateRule(ctx context.Context, uuid string, rule FirewallRule) error {
 	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/setRule/"+uuid, firewallRuleRequest{
 		Rule: encodeFirewallRule(rule),
