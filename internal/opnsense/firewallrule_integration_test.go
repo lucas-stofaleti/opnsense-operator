@@ -5,7 +5,6 @@ package opnsense
 import (
 	"context"
 	"errors"
-	"net/http"
 	"testing"
 	"time"
 )
@@ -55,19 +54,18 @@ func TestCreateRuleIntegration(t *testing.T) {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
 
-		// ApplyFirewallRules is implemented in a later chunk; use doJSON directly.
+		// ApplyFirewallRules is now available; use it for cleanup.
 		if err := client.DeleteRule(cleanupCtx, uuid); err == nil {
-			_, _ = client.doJSON(cleanupCtx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{})
+			_ = client.ApplyFirewallRules(cleanupCtx)
 		}
 	}()
 
-	// Use client.DeleteRule now that it is implemented.
 	if err := client.DeleteRule(ctx, uuid); err != nil {
 		t.Fatalf("delete rule returned error: %v", err)
 	}
 	deleted = true
 
-	if _, err := client.doJSON(ctx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{}); err != nil {
+	if err := client.ApplyFirewallRules(ctx); err != nil {
 		t.Fatalf("apply returned error: %v", err)
 	}
 }
@@ -117,7 +115,7 @@ func TestGetRuleIntegration(t *testing.T) {
 		defer cleanupCancel()
 
 		if err := client.DeleteRule(cleanupCtx, uuid); err == nil {
-			_, _ = client.doJSON(cleanupCtx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{})
+			_ = client.ApplyFirewallRules(cleanupCtx)
 		}
 	}()
 
@@ -177,7 +175,7 @@ func TestGetRuleIntegration(t *testing.T) {
 	}
 	deleted = true
 
-	if _, err := client.doJSON(ctx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{}); err != nil {
+	if err := client.ApplyFirewallRules(ctx); err != nil {
 		t.Fatalf("apply returned error: %v", err)
 	}
 }
@@ -221,7 +219,7 @@ func TestSearchRuleByManagedSuffixIntegration(t *testing.T) {
 		defer cleanupCancel()
 
 		if err := client.DeleteRule(cleanupCtx, uuid); err == nil {
-			_, _ = client.doJSON(cleanupCtx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{})
+			_ = client.ApplyFirewallRules(cleanupCtx)
 		}
 	}()
 
@@ -246,7 +244,7 @@ func TestSearchRuleByManagedSuffixIntegration(t *testing.T) {
 	}
 	deleted = true
 
-	if _, err := client.doJSON(ctx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{}); err != nil {
+	if err := client.ApplyFirewallRules(ctx); err != nil {
 		t.Fatalf("apply returned error: %v", err)
 	}
 }
@@ -291,7 +289,7 @@ func TestUpdateRuleIntegration(t *testing.T) {
 		defer cleanupCancel()
 
 		if err := client.DeleteRule(cleanupCtx, uuid); err == nil {
-			_, _ = client.doJSON(cleanupCtx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{})
+			_ = client.ApplyFirewallRules(cleanupCtx)
 		}
 	}()
 
@@ -324,7 +322,7 @@ func TestUpdateRuleIntegration(t *testing.T) {
 	}
 	deleted = true
 
-	if _, err := client.doJSON(ctx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{}); err != nil {
+	if err := client.ApplyFirewallRules(ctx); err != nil {
 		t.Fatalf("apply returned error: %v", err)
 	}
 }
@@ -368,9 +366,9 @@ func TestDeleteRuleIntegration(t *testing.T) {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
 
-		// ApplyFirewallRules is implemented in a later chunk; use doJSON directly.
+		// ApplyFirewallRules is now available; use it for cleanup.
 		if err := client.DeleteRule(cleanupCtx, uuid); err == nil {
-			_, _ = client.doJSON(cleanupCtx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{})
+			_ = client.ApplyFirewallRules(cleanupCtx)
 		}
 	}()
 
@@ -379,7 +377,7 @@ func TestDeleteRuleIntegration(t *testing.T) {
 	}
 	deleted = true
 
-	if _, err := client.doJSON(ctx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{}); err != nil {
+	if err := client.ApplyFirewallRules(ctx); err != nil {
 		t.Fatalf("apply returned error: %v", err)
 	}
 
@@ -388,5 +386,76 @@ func TestDeleteRuleIntegration(t *testing.T) {
 	_, err = client.GetRule(ctx, uuid)
 	if !errors.Is(err, ErrFirewallRuleNotFound) {
 		t.Fatalf("expected ErrFirewallRuleNotFound after delete, got: %v", err)
+	}
+}
+
+func TestApplyFirewallRulesIntegration(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh -X POST -d '{}' /api/firewall/filter/apply
+	// Real response:
+	//   {"status":"OK\n\n"}
+	client := newIntegrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	suffix := "ci-apply-" + time.Now().UTC().Format("150405")
+	uuid, err := client.CreateRule(ctx, FirewallRule{
+		Enabled:        true,
+		Action:         "pass",
+		Direction:      "in",
+		IPProtocol:     "inet",
+		Protocol:       "any",
+		SourceNet:      "any",
+		DestinationNet: "any",
+		Quick:          true,
+		Description:    suffix + " [opnsense-operator:default/ci-apply-test]",
+	})
+	if err != nil {
+		t.Fatalf("CreateRule returned error: %v", err)
+	}
+
+	deleted := false
+	defer func() {
+		if deleted {
+			return
+		}
+
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+
+		if err := client.DeleteRule(cleanupCtx, uuid); err == nil {
+			_ = client.ApplyFirewallRules(cleanupCtx)
+		}
+	}()
+
+	if err := client.ApplyFirewallRules(ctx); err != nil {
+		t.Fatalf("ApplyFirewallRules returned error: %v", err)
+	}
+
+	// Rule should be visible via search after apply.
+	uuids, err := client.SearchRuleByManagedSuffix(ctx, "default/ci-apply-test")
+	if err != nil {
+		t.Fatalf("SearchRuleByManagedSuffix returned error: %v", err)
+	}
+	found := false
+	for _, u := range uuids {
+		if u == uuid {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected UUID %q in search results %v after apply", uuid, uuids)
+	}
+
+	if err := client.DeleteRule(ctx, uuid); err != nil {
+		t.Fatalf("DeleteRule returned error: %v", err)
+	}
+	deleted = true
+
+	if err := client.ApplyFirewallRules(ctx); err != nil {
+		t.Fatalf("ApplyFirewallRules (cleanup) returned error: %v", err)
 	}
 }

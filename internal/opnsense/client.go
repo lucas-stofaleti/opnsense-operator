@@ -410,6 +410,25 @@ func (c *Client) DeleteRule(ctx context.Context, uuid string) error {
 	}
 }
 
+func (c *Client) ApplyFirewallRules(ctx context.Context) error {
+	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{})
+	if err != nil {
+		return err
+	}
+
+	var response struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return fmt.Errorf("decode apply firewall rules response: %w", err)
+	}
+	if strings.TrimSpace(response.Status) != "OK" {
+		return fmt.Errorf("%w: expected apply status OK, got %q", ErrUnexpectedResponse, response.Status)
+	}
+
+	return nil
+}
+
 func (c *Client) UpdateRule(ctx context.Context, uuid string, rule FirewallRule) error {
 	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/setRule/"+uuid, firewallRuleRequest{
 		Rule: encodeFirewallRule(rule),

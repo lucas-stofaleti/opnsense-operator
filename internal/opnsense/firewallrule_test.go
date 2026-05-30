@@ -721,3 +721,70 @@ func TestDeleteRuleTransportError(t *testing.T) {
 func decodeBody(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
+
+func TestApplyFirewallRules(t *testing.T) {
+	t.Parallel()
+
+	// Verified with:
+	//   hack/opnsense-curl.sh -X POST -d '{}' /api/firewall/filter/apply
+	// Real response:
+	//   {"status":"OK\n\n"}
+	// Note: status uses uppercase "OK" with trailing newlines — must use
+	// strings.TrimSpace for comparison, not an exact string match.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST request, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/firewall/filter/apply" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+
+		writeJSON(t, w, http.StatusOK, map[string]string{
+			"status": "OK\n\n",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	err := client.ApplyFirewallRules(context.Background())
+	if err != nil {
+		t.Fatalf("ApplyFirewallRules returned error: %v", err)
+	}
+}
+
+func TestApplyFirewallRulesUnexpectedStatus(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]string{
+			"status": "error\n\n",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	err := client.ApplyFirewallRules(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrUnexpectedResponse) {
+		t.Fatalf("expected ErrUnexpectedResponse, got %v", err)
+	}
+}
+
+func TestApplyFirewallRulesTransportError(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient("http://example.com", testAPIKey, testAPISecret, &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return nil, errors.New("dial failed")
+		}),
+	})
+
+	err := client.ApplyFirewallRules(context.Background())
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+}
