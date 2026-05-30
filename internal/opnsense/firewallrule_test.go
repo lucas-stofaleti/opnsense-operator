@@ -722,6 +722,54 @@ func decodeBody(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
+func TestSelectedKeyNoSelectedEntry(t *testing.T) {
+	t.Parallel()
+
+	// Covers the return "" path when no map entry has Selected == 1.
+	result := selectedKey(map[string]getRuleSelectEntry{
+		"pass":   {Value: "Pass", Selected: 0},
+		"block":  {Value: "Block", Selected: 0},
+		"reject": {Value: "Reject", Selected: 0},
+	})
+	if result != "" {
+		t.Fatalf("expected empty string when no entry is selected, got %q", result)
+	}
+}
+
+func TestApplyFirewallRulesDecodeError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`not-json`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	err := client.ApplyFirewallRules(context.Background())
+	if err == nil {
+		t.Fatal("expected error on invalid JSON response")
+	}
+}
+
+func TestUpdateRuleDecodeError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`not-json`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
+
+	err := client.UpdateRule(context.Background(), "eb3c7d1b-4348-4b93-8a94-1efabf9225d2", FirewallRule{})
+	if err == nil {
+		t.Fatal("expected error on invalid JSON response")
+	}
+}
+
 func TestApplyFirewallRules(t *testing.T) {
 	t.Parallel()
 

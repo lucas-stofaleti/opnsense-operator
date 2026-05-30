@@ -459,3 +459,171 @@ func TestApplyFirewallRulesIntegration(t *testing.T) {
 		t.Fatalf("ApplyFirewallRules (cleanup) returned error: %v", err)
 	}
 }
+
+func TestFirewallRuleLifecycleIntegration(t *testing.T) {
+	t.Parallel()
+
+	// Full end-to-end lifecycle: Create → Apply → Search → Get → Update →
+	// Apply → Get (updated) → Delete → Apply → Get (not found) → Search (empty).
+	client := newIntegrationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	ts := time.Now().UTC().Format("150405")
+	suffix := "default/lifecycle-" + ts
+	managedDescription := "lifecycle-" + ts + " [opnsense-operator:" + suffix + "]"
+
+	initial := FirewallRule{
+		Enabled:         true,
+		Action:          "pass",
+		Interface:       "lan",
+		Direction:       "in",
+		IPProtocol:      "inet",
+		Protocol:        "TCP",
+		SourceNet:       "any",
+		SourceNot:       false,
+		SourcePort:      "",
+		DestinationNet:  "192.168.1.0/24",
+		DestinationNot:  false,
+		DestinationPort: "443",
+		Log:             false,
+		Quick:           true,
+		Description:     managedDescription,
+	}
+
+	// Step 1: Create.
+	uuid, err := client.CreateRule(ctx, initial)
+	if err != nil {
+		t.Fatalf("CreateRule returned error: %v", err)
+	}
+	if uuid == "" {
+		t.Fatal("expected non-empty UUID from CreateRule")
+	}
+
+	deleted := false
+	defer func() {
+		if deleted {
+			return
+		}
+
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+
+		if err := client.DeleteRule(cleanupCtx, uuid); err == nil {
+			_ = client.ApplyFirewallRules(cleanupCtx)
+		}
+	}()
+
+	// Step 2: Apply.
+	if err := client.ApplyFirewallRules(ctx); err != nil {
+		t.Fatalf("ApplyFirewallRules after CreateRule returned error: %v", err)
+	}
+
+	// Step 3: Search by suffix → assert the created UUID is found.
+	uuids, err := client.SearchRuleByManagedSuffix(ctx, suffix)
+	if err != nil {
+		t.Fatalf("SearchRuleByManagedSuffix returned error: %v", err)
+	}
+	found := false
+	for _, u := range uuids {
+		if u == uuid {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected UUID %q in SearchRuleByManagedSuffix results %v", uuid, uuids)
+	}
+
+	// Step 4: GetRule → assert all fields match what was sent.
+	got, err := client.GetRule(ctx, uuid)
+	if err != nil {
+		t.Fatalf("GetRule returned error: %v", err)
+	}
+	if got.Enabled != initial.Enabled {
+		t.Errorf("Enabled: got %v, want %v", got.Enabled, initial.Enabled)
+	}
+	if got.Action != initial.Action {
+		t.Errorf("Action: got %q, want %q", got.Action, initial.Action)
+	}
+	if got.Interface != initial.Interface {
+		t.Errorf("Interface: got %q, want %q", got.Interface, initial.Interface)
+	}
+	if got.Direction != initial.Direction {
+		t.Errorf("Direction: got %q, want %q", got.Direction, initial.Direction)
+	}
+	if got.IPProtocol != initial.IPProtocol {
+		t.Errorf("IPProtocol: got %q, want %q", got.IPProtocol, initial.IPProtocol)
+	}
+	if got.Protocol != initial.Protocol {
+		t.Errorf("Protocol: got %q, want %q", got.Protocol, initial.Protocol)
+	}
+	if got.SourceNet != initial.SourceNet {
+		t.Errorf("SourceNet: got %q, want %q", got.SourceNet, initial.SourceNet)
+	}
+	if got.DestinationNet != initial.DestinationNet {
+		t.Errorf("DestinationNet: got %q, want %q", got.DestinationNet, initial.DestinationNet)
+	}
+	if got.DestinationPort != initial.DestinationPort {
+		t.Errorf("DestinationPort: got %q, want %q", got.DestinationPort, initial.DestinationPort)
+	}
+	if got.Description != initial.Description {
+		t.Errorf("Description: got %q, want %q", got.Description, initial.Description)
+	}
+
+	// Step 5: UpdateRule — change action to "block" and destination.
+	updated := initial
+	updated.Action = "block"
+	updated.DestinationNet = "10.0.0.0/8"
+	updated.DestinationPort = "8080"
+
+	if err := client.UpdateRule(ctx, uuid, updated); err != nil {
+		t.Fatalf("UpdateRule returned error: %v", err)
+	}
+
+	// Step 6: Apply.
+	if err := client.ApplyFirewallRules(ctx); err != nil {
+		t.Fatalf("ApplyFirewallRules after UpdateRule returned error: %v", err)
+	}
+
+	// Step 7: GetRule → assert updated fields.
+	gotUpdated, err := client.GetRule(ctx, uuid)
+	if err != nil {
+		t.Fatalf("GetRule after UpdateRule returned error: %v", err)
+	}
+	if gotUpdated.Action != updated.Action {
+		t.Errorf("Action after update: got %q, want %q", gotUpdated.Action, updated.Action)
+	}
+	if gotUpdated.DestinationNet != updated.DestinationNet {
+		t.Errorf("DestinationNet after update: got %q, want %q", gotUpdated.DestinationNet, updated.DestinationNet)
+	}
+	if gotUpdated.DestinationPort != updated.DestinationPort {
+		t.Errorf("DestinationPort after update: got %q, want %q", gotUpdated.DestinationPort, updated.DestinationPort)
+	}
+
+	// Step 8: DeleteRule.
+	if err := client.DeleteRule(ctx, uuid); err != nil {
+		t.Fatalf("DeleteRule returned error: %v", err)
+	}
+	deleted = true
+
+	// Step 9: Apply.
+	if err := client.ApplyFirewallRules(ctx); err != nil {
+		t.Fatalf("ApplyFirewallRules after DeleteRule returned error: %v", err)
+	}
+
+	// Step 10: GetRule → assert ErrFirewallRuleNotFound.
+	_, err = client.GetRule(ctx, uuid)
+	if !errors.Is(err, ErrFirewallRuleNotFound) {
+		t.Fatalf("expected ErrFirewallRuleNotFound after delete, got: %v", err)
+	}
+
+	// Step 11: SearchRuleByManagedSuffix → assert empty result.
+	uuids, err = client.SearchRuleByManagedSuffix(ctx, suffix)
+	if err != nil {
+		t.Fatalf("SearchRuleByManagedSuffix after delete returned error: %v", err)
+	}
+	if len(uuids) != 0 {
+		t.Fatalf("expected empty search results after delete, got %v", uuids)
+	}
+}
