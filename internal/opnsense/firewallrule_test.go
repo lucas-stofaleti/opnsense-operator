@@ -558,24 +558,26 @@ func TestUpdateRule(t *testing.T) {
 func TestUpdateRuleNotFound(t *testing.T) {
 	t.Parallel()
 
-	// setRule not-found behaviour is undocumented in the evidence file — it was not
-	// explicitly tested with a missing UUID. As a safe fallback, any result that is
-	// neither "saved" nor "failed" is treated as ErrUnexpectedResponse.
+	// setRule returns {"result":"failed"} with no validations when the UUID does not exist.
+	// Verified with:
+	//   hack/opnsense-curl.sh -X POST -d '{"rule":{"description":"probe"}}' /api/firewall/filter/setRule/00000000-0000-0000-0000-000000000000
+	// Real response:
+	//   {"result":"failed"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, http.StatusOK, map[string]string{
-			"result": "not found",
+			"result": "failed",
 		})
 	}))
 	defer server.Close()
 
 	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
 
-	err := client.UpdateRule(context.Background(), "11111111-2222-3333-4444-555555555555", FirewallRule{})
+	err := client.UpdateRule(context.Background(), "00000000-0000-0000-0000-000000000000", FirewallRule{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !errors.Is(err, ErrUnexpectedResponse) {
-		t.Fatalf("expected ErrUnexpectedResponse, got %v", err)
+	if !errors.Is(err, ErrFirewallRuleNotFound) {
+		t.Fatalf("expected ErrFirewallRuleNotFound, got %v", err)
 	}
 }
 

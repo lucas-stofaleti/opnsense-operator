@@ -13,6 +13,8 @@ import (
 	"strings"
 )
 
+const resultFailed = "failed"
+
 var (
 	ErrAliasNotFound        = errors.New("opnsense alias not found")
 	ErrFirewallRuleNotFound = errors.New("opnsense firewall rule not found")
@@ -225,7 +227,7 @@ func (c *Client) UpdateAlias(ctx context.Context, uuid string, alias Alias) erro
 	if err != nil {
 		return err
 	}
-	if response.Result == "failed" && len(response.Validations) == 0 {
+	if response.Result == resultFailed && len(response.Validations) == 0 {
 		return ErrAliasNotFound
 	}
 
@@ -442,6 +444,14 @@ func (c *Client) UpdateRule(ctx context.Context, uuid string, rule FirewallRule)
 		return err
 	}
 
+	// setRule returns {"result":"failed"} with no validations when the UUID does
+	// not exist — verified with: hack/opnsense-curl.sh -X POST -d '{"rule":{"description":"probe"}}'
+	// /api/firewall/filter/setRule/00000000-0000-0000-0000-000000000000
+	// Real response: {"result":"failed"}
+	if response.Result == resultFailed && len(response.Validations) == 0 {
+		return ErrFirewallRuleNotFound
+	}
+
 	return response.resultError("saved")
 }
 
@@ -564,7 +574,7 @@ func decodeResultResponse(body []byte) (resultResponse, error) {
 }
 
 func (r resultResponse) resultError(expected string) error {
-	if r.Result == "failed" {
+	if r.Result == resultFailed {
 		return &ValidationError{FieldErrors: r.Validations}
 	}
 	if r.Result != expected {
