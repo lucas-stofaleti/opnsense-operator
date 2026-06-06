@@ -1,0 +1,9 @@
+apiVersion: firewall.opnsense.io/v1alpha1
+kind: FirewallRule
+metadata:
+  labels:
+    app.kubernetes.io/name: opnsense-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: firewallrule-sample
+spec:
+  # TODO(user): Add fields here

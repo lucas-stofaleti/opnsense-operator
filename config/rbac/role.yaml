@@ -16,6 +16,7 @@ rules:
   - firewall.opnsense.io
   resources:
   - aliases
+  - firewallrules
   - opnsenseconnections
   verbs:
   - create
@@ -29,6 +30,7 @@ rules:
   - firewall.opnsense.io
   resources:
   - aliases/finalizers
+  - firewallrules/finalizers
   - opnsenseconnections/finalizers
   verbs:
   - update
@@ -36,6 +38,7 @@ rules:
   - firewall.opnsense.io
   resources:
   - aliases/status
+  - firewallrules/status
   - opnsenseconnections/status
   verbs:
   - get
