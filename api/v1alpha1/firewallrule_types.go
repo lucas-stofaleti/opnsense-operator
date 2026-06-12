@@ -126,7 +126,7 @@ type FirewallRuleStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Namespaced
+// +kubebuilder:resource:scope=Namespaced,shortName=fwr
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Sequence",type=string,JSONPath=".status.sequence"
 // +kubebuilder:printcolumn:name="Action",type=string,JSONPath=".spec.action"

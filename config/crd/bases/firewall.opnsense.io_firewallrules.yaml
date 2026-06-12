@@ -11,6 +11,8 @@ spec:
     kind: FirewallRule
     listKind: FirewallRuleList
     plural: firewallrules
+    shortNames:
+    - fwr
     singular: firewallrule
   scope: Namespaced
   versions:
