@@ -2,4 +2,5 @@
 resources:
 - firewall_v1alpha1_alias.yaml
 - firewall_v1alpha1_opnsenseconnection.yaml
+- firewall_v1alpha1_firewallrule.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

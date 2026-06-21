@@ -4,6 +4,7 @@
 resources:
 - bases/firewall.opnsense.io_aliases.yaml
 - bases/firewall.opnsense.io_opnsenseconnections.yaml
+- bases/firewall.opnsense.io_firewallrules.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

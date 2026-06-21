@@ -13,10 +13,13 @@ import (
 	"strings"
 )
 
+const resultFailed = "failed"
+
 var (
-	ErrAliasNotFound      = errors.New("opnsense alias not found")
-	ErrValidationFailed   = errors.New("opnsense validation failed")
-	ErrUnexpectedResponse = errors.New("unexpected opnsense response")
+	ErrAliasNotFound        = errors.New("opnsense alias not found")
+	ErrFirewallRuleNotFound = errors.New("opnsense firewall rule not found")
+	ErrValidationFailed     = errors.New("opnsense validation failed")
+	ErrUnexpectedResponse   = errors.New("unexpected opnsense response")
 )
 
 type Client struct {
@@ -32,6 +35,26 @@ type Alias struct {
 	Type        string
 	Content     string
 	Description string
+}
+
+// FirewallRule represents the operator-managed fields of an OPNsense filter rule.
+type FirewallRule struct {
+	Enabled         bool
+	Action          string // "pass", "block", "reject"
+	Interface       string // "" = floating, "lan"/"wan"/etc = interface rule
+	Direction       string // "in", "out", "any"
+	IPProtocol      string // "inet", "inet6", "inet46"
+	Protocol        string // "any", "TCP", "UDP", etc.
+	SourceNet       string
+	SourceNot       bool
+	SourcePort      string
+	DestinationNet  string
+	DestinationNot  bool
+	DestinationPort string
+	Sequence        string // stored as string in OPNsense
+	Log             bool
+	Quick           bool
+	Description     string // includes the managed suffix
 }
 
 type ValidationError struct {
@@ -204,7 +227,7 @@ func (c *Client) UpdateAlias(ctx context.Context, uuid string, alias Alias) erro
 	if err != nil {
 		return err
 	}
-	if response.Result == "failed" && len(response.Validations) == 0 {
+	if response.Result == resultFailed && len(response.Validations) == 0 {
 		return ErrAliasNotFound
 	}
 
@@ -263,6 +286,197 @@ func (c *Client) ReconfigureAliases(ctx context.Context) error {
 	return nil
 }
 
+// getRuleResponse is the internal decode struct for getRule/{uuid} responses.
+// Select fields (action, interface, direction, ipprotocol, protocol) are returned
+// as maps of option-key → {value, selected} objects; flat fields are plain strings.
+type getRuleResponse struct {
+	Rule struct {
+		Enabled         string                        `json:"enabled"`
+		Sequence        string                        `json:"sequence"`
+		Action          map[string]getRuleSelectEntry `json:"action"`
+		Interface       map[string]getRuleSelectEntry `json:"interface"`
+		Direction       map[string]getRuleSelectEntry `json:"direction"`
+		IPProtocol      map[string]getRuleSelectEntry `json:"ipprotocol"`
+		Protocol        map[string]getRuleSelectEntry `json:"protocol"`
+		SourceNet       string                        `json:"source_net"`
+		SourceNot       string                        `json:"source_not"`
+		SourcePort      string                        `json:"source_port"`
+		DestinationNet  string                        `json:"destination_net"`
+		DestinationNot  string                        `json:"destination_not"`
+		DestinationPort string                        `json:"destination_port"`
+		Log             string                        `json:"log"`
+		Quick           string                        `json:"quick"`
+		Description     string                        `json:"description"`
+	} `json:"rule"`
+}
+
+type getRuleSelectEntry struct {
+	Value    string `json:"value"`
+	Selected int    `json:"selected"`
+}
+
+// selectedKey returns the map key whose Selected field is 1, or "" if none is selected.
+func selectedKey(m map[string]getRuleSelectEntry) string {
+	for k, v := range m {
+		if v.Selected == 1 {
+			return k
+		}
+	}
+	return ""
+}
+
+func (c *Client) GetRule(ctx context.Context, uuid string) (FirewallRule, error) {
+	body, err := c.doJSON(ctx, http.MethodGet, "/api/firewall/filter/getRule/"+uuid, nil)
+	if err != nil {
+		return FirewallRule{}, err
+	}
+
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		return FirewallRule{}, ErrFirewallRuleNotFound
+	}
+
+	var response getRuleResponse
+	if err := json.Unmarshal(trimmed, &response); err != nil {
+		return FirewallRule{}, fmt.Errorf("decode get rule response: %w", err)
+	}
+
+	r := response.Rule
+	if r.Action == nil && r.Direction == nil {
+		return FirewallRule{}, fmt.Errorf("%w: get rule response did not contain rule data", ErrUnexpectedResponse)
+	}
+
+	return FirewallRule{
+		Enabled:         r.Enabled == "1",
+		Action:          selectedKey(r.Action),
+		Interface:       selectedKey(r.Interface),
+		Direction:       selectedKey(r.Direction),
+		IPProtocol:      selectedKey(r.IPProtocol),
+		Protocol:        selectedKey(r.Protocol),
+		SourceNet:       r.SourceNet,
+		SourceNot:       r.SourceNot == "1",
+		SourcePort:      r.SourcePort,
+		DestinationNet:  r.DestinationNet,
+		DestinationNot:  r.DestinationNot == "1",
+		DestinationPort: r.DestinationPort,
+		Sequence:        r.Sequence,
+		Log:             r.Log == "1",
+		Quick:           r.Quick == "1",
+		Description:     r.Description,
+	}, nil
+}
+
+func (c *Client) SearchRuleByManagedSuffix(ctx context.Context, suffix string) ([]string, error) {
+	body, err := c.doJSON(ctx, http.MethodGet, "/api/firewall/filter/searchRule?searchPhrase="+url.QueryEscape(suffix), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Rows []struct {
+			UUID string `json:"uuid"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("decode search rule response: %w", err)
+	}
+
+	uuids := make([]string, 0, len(response.Rows))
+	for _, row := range response.Rows {
+		uuids = append(uuids, row.UUID)
+	}
+
+	return uuids, nil
+}
+
+func (c *Client) DeleteRule(ctx context.Context, uuid string) error {
+	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/delRule/"+uuid, map[string]string{})
+	if err != nil {
+		return err
+	}
+
+	var response struct {
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return fmt.Errorf("decode delete rule response: %w", err)
+	}
+
+	switch response.Result {
+	case "deleted":
+		return nil
+	case "not found":
+		return ErrFirewallRuleNotFound
+	default:
+		return fmt.Errorf("%w: delete rule returned unexpected result %q", ErrUnexpectedResponse, response.Result)
+	}
+}
+
+func (c *Client) ApplyFirewallRules(ctx context.Context) error {
+	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/apply", map[string]string{})
+	if err != nil {
+		return err
+	}
+
+	var response struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return fmt.Errorf("decode apply firewall rules response: %w", err)
+	}
+	if strings.TrimSpace(response.Status) != "OK" {
+		return fmt.Errorf("%w: expected apply status OK, got %q", ErrUnexpectedResponse, response.Status)
+	}
+
+	return nil
+}
+
+func (c *Client) UpdateRule(ctx context.Context, uuid string, rule FirewallRule) error {
+	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/setRule/"+uuid, firewallRuleRequest{
+		Rule: encodeFirewallRule(rule),
+	})
+	if err != nil {
+		return err
+	}
+
+	response, err := decodeResultResponse(body)
+	if err != nil {
+		return err
+	}
+
+	// setRule returns {"result":"failed"} with no validations when the UUID does
+	// not exist — verified with: hack/opnsense-curl.sh -X POST -d '{"rule":{"description":"probe"}}'
+	// /api/firewall/filter/setRule/00000000-0000-0000-0000-000000000000
+	// Real response: {"result":"failed"}
+	if response.Result == resultFailed && len(response.Validations) == 0 {
+		return ErrFirewallRuleNotFound
+	}
+
+	return response.resultError("saved")
+}
+
+func (c *Client) CreateRule(ctx context.Context, rule FirewallRule) (string, error) {
+	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/addRule", firewallRuleRequest{
+		Rule: encodeFirewallRule(rule),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	response, err := decodeResultResponse(body)
+	if err != nil {
+		return "", err
+	}
+	if err := response.resultError("saved"); err != nil {
+		return "", err
+	}
+	if response.UUID == "" {
+		return "", fmt.Errorf("%w: create rule response did not contain a uuid", ErrUnexpectedResponse)
+	}
+
+	return response.UUID, nil
+}
+
 type aliasRequest struct {
 	Alias aliasPayload `json:"alias"`
 }
@@ -290,6 +504,59 @@ func encodeAlias(alias Alias) aliasPayload {
 	}
 }
 
+type firewallRuleRequest struct {
+	Rule firewallRulePayload `json:"rule"`
+}
+
+type firewallRulePayload struct {
+	Enabled         string `json:"enabled"`
+	Action          string `json:"action"`
+	Interface       string `json:"interface"`
+	Direction       string `json:"direction"`
+	IPProtocol      string `json:"ipprotocol"`
+	Protocol        string `json:"protocol"`
+	SourceNet       string `json:"source_net"`
+	SourceNot       string `json:"source_not"`
+	SourcePort      string `json:"source_port"`
+	DestinationNet  string `json:"destination_net"`
+	DestinationNot  string `json:"destination_not"`
+	DestinationPort string `json:"destination_port"`
+	// OPNsense treats an explicitly empty sequence as a validation error;
+	// omitempty causes the field to be omitted when blank so OPNsense auto-assigns.
+	Sequence    string `json:"sequence,omitempty"`
+	Log         string `json:"log"`
+	Quick       string `json:"quick"`
+	Description string `json:"description"`
+}
+
+func boolToStr(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
+func encodeFirewallRule(rule FirewallRule) firewallRulePayload {
+	return firewallRulePayload{
+		Enabled:         boolToStr(rule.Enabled),
+		Action:          rule.Action,
+		Interface:       rule.Interface,
+		Direction:       rule.Direction,
+		IPProtocol:      rule.IPProtocol,
+		Protocol:        rule.Protocol,
+		SourceNet:       rule.SourceNet,
+		SourceNot:       boolToStr(rule.SourceNot),
+		SourcePort:      rule.SourcePort,
+		DestinationNet:  rule.DestinationNet,
+		DestinationNot:  boolToStr(rule.DestinationNot),
+		DestinationPort: rule.DestinationPort,
+		Sequence:        rule.Sequence,
+		Log:             boolToStr(rule.Log),
+		Quick:           boolToStr(rule.Quick),
+		Description:     rule.Description,
+	}
+}
+
 type resultResponse struct {
 	Result      string            `json:"result"`
 	Status      string            `json:"status"`
@@ -307,7 +574,7 @@ func decodeResultResponse(body []byte) (resultResponse, error) {
 }
 
 func (r resultResponse) resultError(expected string) error {
-	if r.Result == "failed" {
+	if r.Result == resultFailed {
 		return &ValidationError{FieldErrors: r.Validations}
 	}
 	if r.Result != expected {

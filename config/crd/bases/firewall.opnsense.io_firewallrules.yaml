@@ -1,0 +1,274 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: firewallrules.firewall.opnsense.io
+spec:
+  group: firewall.opnsense.io
+  names:
+    kind: FirewallRule
+    listKind: FirewallRuleList
+    plural: firewallrules
+    shortNames:
+    - fwr
+    singular: firewallrule
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.sequence
+      name: Sequence
+      type: string
+    - jsonPath: .spec.action
+      name: Action
+      type: string
+    - jsonPath: .spec.direction
+      name: Direction
+      priority: 1
+      type: string
+    - jsonPath: .spec.interface
+      name: Interface
+      type: string
+    - jsonPath: .spec.source.net
+      name: Source
+      priority: 1
+      type: string
+    - jsonPath: .spec.destination.net
+      name: Destination
+      priority: 1
+      type: string
+    - jsonPath: .spec.connectionRef.name
+      name: Connection
+      type: string
+    - jsonPath: .status.uuid
+      name: UUID
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: FirewallRule is the Schema for the firewallrules API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of FirewallRule
+            properties:
+              action:
+                description: action defines what to do with matching traffic.
+                enum:
+                - pass
+                - block
+                - reject
+                type: string
+              connectionRef:
+                description: connectionRef points to the OPNsenseConnection used to
+                  manage this rule.
+                properties:
+                  name:
+                    description: name is the name of the OPNsenseConnection resource.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              description:
+                description: |-
+                  description is a human-readable description stored in OPNsense.
+                  The controller appends a managed suffix automatically — do not include it here.
+                type: string
+              destination:
+                description: destination defines the traffic destination match criteria.
+                properties:
+                  net:
+                    description: net is the network address or alias to match (e.g.
+                      "any", "192.168.1.0/24", "myalias").
+                    minLength: 1
+                    type: string
+                  not:
+                    description: not inverts the match — traffic NOT from/to this
+                      net.
+                    type: boolean
+                  port:
+                    description: port is the port or port range (e.g. "443", "8080:8090").
+                      Empty means any port.
+                    type: string
+                required:
+                - net
+                type: object
+              direction:
+                description: direction is the traffic direction to match.
+                enum:
+                - in
+                - out
+                - any
+                type: string
+              enabled:
+                default: true
+                description: enabled controls whether the rule is active in OPNsense.
+                type: boolean
+              interface:
+                description: |-
+                  interface is the OPNsense interface name (e.g. "lan", "wan").
+                  Leave empty for a floating rule that applies to all interfaces.
+                type: string
+              ipProtocol:
+                default: inet
+                description: ipProtocol is the IP version to match.
+                enum:
+                - inet
+                - inet6
+                - inet46
+                type: string
+              log:
+                description: log enables logging for traffic matched by this rule.
+                type: boolean
+              protocol:
+                default: any
+                description: |-
+                  protocol is the transport protocol to match (e.g. "any", "TCP", "UDP", "ICMP").
+                  No enum — OPNsense validates the value.
+                type: string
+              quick:
+                default: true
+                description: quick stops processing further rules when this rule matches.
+                type: boolean
+              sequence:
+                description: |-
+                  sequence is the rule ordering position in OPNsense.
+                  If omitted, OPNsense assigns a position automatically.
+                format: int32
+                type: integer
+              source:
+                description: source defines the traffic source match criteria.
+                properties:
+                  net:
+                    description: net is the network address or alias to match (e.g.
+                      "any", "192.168.1.0/24", "myalias").
+                    minLength: 1
+                    type: string
+                  not:
+                    description: not inverts the match — traffic NOT from/to this
+                      net.
+                    type: boolean
+                  port:
+                    description: port is the port or port range (e.g. "443", "8080:8090").
+                      Empty means any port.
+                    type: string
+                required:
+                - net
+                type: object
+            required:
+            - action
+            - connectionRef
+            - destination
+            - direction
+            - source
+            type: object
+          status:
+            description: status defines the observed state of FirewallRule
+            properties:
+              conditions:
+                description: conditions represent the current state of the FirewallRule
+                  resource.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                description: observedGeneration records the most recent generation
+                  observed by the controller.
+                format: int64
+                type: integer
+              sequence:
+                description: |-
+                  sequence is the rule ordering position observed in OPNsense.
+                  Populated by the controller after create or update.
+                type: string
+              uuid:
+                description: uuid is the OPNsense identifier for the managed rule.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

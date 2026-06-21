@@ -1,0 +1,26 @@
+apiVersion: firewall.opnsense.io/v1alpha1
+kind: FirewallRule
+metadata:
+  labels:
+    app.kubernetes.io/name: opnsense-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: firewallrule-sample
+spec:
+  connectionRef:
+    name: opnsenseconnection-sample
+  enabled: true
+  action: pass
+  direction: in
+  interface: lan
+  ipProtocol: inet
+  protocol: TCP
+  source:
+    net: any
+  destination:
+    net: any
+    port: "443"
+  quick: true
+  log: false
+  description: Allow inbound HTTPS on LAN
+  # sequence is optional — omit it to let OPNsense auto-assign the position.
+  # sequence: 1000
