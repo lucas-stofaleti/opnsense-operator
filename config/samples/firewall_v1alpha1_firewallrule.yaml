@@ -6,4 +6,21 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: firewallrule-sample
 spec:
-  # TODO(user): Add fields here
+  connectionRef:
+    name: opnsenseconnection-sample
+  enabled: true
+  action: pass
+  direction: in
+  interface: lan
+  ipProtocol: inet
+  protocol: TCP
+  source:
+    net: any
+  destination:
+    net: any
+    port: "443"
+  quick: true
+  log: false
+  description: Allow inbound HTTPS on LAN
+  # sequence is optional — omit it to let OPNsense auto-assign the position.
+  # sequence: 1000
