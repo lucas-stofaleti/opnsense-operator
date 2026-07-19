@@ -1,0 +1,11 @@
+apiVersion: v2
+name: opnsense-operator
+description: A Helm chart to distribute opnsense-operator
+type: application
+version: 0.0.0
+appVersion: "v0.0.0"
+keywords:
+  - kubernetes
+  - operator
+annotations:
+  kubebuilder.io/generated-by: kubebuilder
