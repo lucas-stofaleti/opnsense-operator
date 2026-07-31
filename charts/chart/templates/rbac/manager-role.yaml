@@ -1,0 +1,45 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "opnsense-operator.resourceName" (dict "suffix" "manager-role" "context" $) }}
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - firewall.opnsense.io
+  resources:
+  - aliases
+  - firewallrules
+  - opnsenseconnections
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - firewall.opnsense.io
+  resources:
+  - aliases/finalizers
+  - firewallrules/finalizers
+  - opnsenseconnections/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - firewall.opnsense.io
+  resources:
+  - aliases/status
+  - firewallrules/status
+  - opnsenseconnections/status
+  verbs:
+  - get
+  - patch
+  - update

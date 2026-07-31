@@ -1,0 +1,30 @@
+{{- if .Values.rbacHelpers.enable }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "opnsense-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "opnsense-operator.resourceName" (dict "suffix" "alias-editor-role" "context" $) }}
+rules:
+- apiGroups:
+  - firewall.opnsense.io
+  resources:
+  - aliases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - firewall.opnsense.io
+  resources:
+  - aliases/status
+  verbs:
+  - get
+{{- end }}

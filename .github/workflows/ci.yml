@@ -1,15 +1,10 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
-# Deny all permissions at workflow level; grant only what each job needs.
 permissions: {}
 
-# Cancel in-progress runs for the same workflow + ref, but never on main
-# to avoid interrupting post-merge checks.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -78,6 +73,46 @@ jobs:
             exit 1
           fi
 
+  helm-lint:
+    name: Helm Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        run: make install-helm
+
+      - name: Lint Helm chart
+        run: make helm-lint
+
+  helm-chart-drift:
+    name: Helm Chart Drift
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: [drift-check, helm-lint]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install kubebuilder
+        run: |
+          curl -Lo /tmp/kubebuilder \
+            https://github.com/kubernetes-sigs/kubebuilder/releases/download/v4.13.1/kubebuilder_linux_amd64
+          chmod +x /tmp/kubebuilder
+          sudo mv /tmp/kubebuilder /usr/local/bin/kubebuilder
+
+      - name: Check Helm chart drift
+        run: make helm-chart-drift
+
   test:
     name: Test
     runs-on: ubuntu-24.04
@@ -113,7 +148,8 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    needs: [test]
+    # Dependent on unit tests AND helm checks passing first to save compute time
+    needs: [test, helm-chart-drift]
     permissions:
       contents: read
     steps:
@@ -137,3 +173,18 @@ jobs:
         run: |
           go mod tidy
           make test-e2e
+
+  # Gatekeeper job specifically designed for Branch Protection / Merge Queues
+  ci-success:
+    name: CI Pass
+    runs-on: ubuntu-24.04
+    needs: [lint, build, drift-check, helm-lint, helm-chart-drift, test, e2e]
+    if: always()
+    steps:
+      - name: Check aggregate job status
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required CI jobs failed or were cancelled."
+            exit 1
+          fi
+          echo "All required CI jobs completed successfully!"
