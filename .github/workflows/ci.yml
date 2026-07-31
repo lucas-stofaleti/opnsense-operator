@@ -1,15 +1,10 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
-# Deny all permissions at workflow level; grant only what each job needs.
 permissions: {}
 
-# Cancel in-progress runs for the same workflow + ref, but never on main
-# to avoid interrupting post-merge checks.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -97,7 +92,7 @@ jobs:
     name: Helm Chart Drift
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [drift-check]
+    needs: [drift-check, helm-lint]
     permissions:
       contents: read
     steps:
@@ -153,7 +148,8 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    needs: [test]
+    # Dependent on unit tests AND helm checks passing first to save compute time
+    needs: [test, helm-chart-drift]
     permissions:
       contents: read
     steps:
@@ -177,3 +173,18 @@ jobs:
         run: |
           go mod tidy
           make test-e2e
+
+  # Gatekeeper job specifically designed for Branch Protection / Merge Queues
+  ci-success:
+    name: CI Pass
+    runs-on: ubuntu-24.04
+    needs: [lint, build, drift-check, helm-lint, helm-chart-drift, test, e2e]
+    if: always()
+    steps:
+      - name: Check aggregate job status
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required CI jobs failed or were cancelled."
+            exit 1
+          fi
+          echo "All required CI jobs completed successfully!"
