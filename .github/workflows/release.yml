@@ -148,9 +148,6 @@ jobs:
         run: |
           yq e -i ".manager.image.tag = \"${VERSION}\"" charts/chart/values.yaml
 
-      - name: Package Helm chart
-        run: helm package charts/chart/ -d .cr-release-packages/
-
       - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"
@@ -169,7 +166,6 @@ jobs:
 
       - uses: helm/chart-releaser-action@v1.7.0
         with:
-          skip_packaging: true
           packages_with_index: true
         env:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
