@@ -4,6 +4,21 @@ entries:
   - annotations:
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
+    appVersion: v0.0.2
+    created: "2026-08-29T21:37:45.694958486Z"
+    description: A Helm chart to distribute opnsense-operator
+    digest: 232dc0dc5b4c220140075fcb660c576e1661b14d1b8582f75167d2623b17a3a9
+    keywords:
+    - kubernetes
+    - operator
+    name: opnsense-operator
+    type: application
+    urls:
+    - opnsense-operator-0.0.2.tgz
+    version: 0.0.2
+  - annotations:
+      kubebuilder.io/generated-by: kubebuilder
+    apiVersion: v2
     appVersion: v0.0.1
     created: "2026-08-29T21:10:49.33585369Z"
     description: A Helm chart to distribute opnsense-operator
@@ -16,4 +31,4 @@ entries:
     urls:
     - opnsense-operator-0.0.1.tgz
     version: 0.0.1
-generated: "2026-08-29T21:10:49.335865942Z"
+generated: "2026-08-29T21:37:45.694963655Z"
