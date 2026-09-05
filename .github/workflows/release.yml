@@ -89,7 +89,7 @@ jobs:
           yq e -i ".manager.image.tag = \"${VERSION}\"" charts/chart/values.yaml
 
       - name: Build and push multi-arch image
-        run: make docker-buildx IMG="${IMG}" PLATFORMS=linux/amd64,linux/arm64
+        run: make docker-buildx IMG="${IMG}"
 
       - name: Generate install bundle
         run: make build-installer IMG="${IMG}"
