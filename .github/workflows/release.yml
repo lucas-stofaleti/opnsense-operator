@@ -111,7 +111,7 @@ jobs:
           gh release create "${VERSION}" \
             dist/install.yaml \
             dist/opnsense-operator-${VERSION_NUM}.tgz \
-            --title "Release ${VERSION}" \
+            --title "${VERSION}" \
             --generate-notes
 
   publish-chart:
