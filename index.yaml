@@ -5,9 +5,9 @@ entries:
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: v0.0.1
-    created: "2026-09-05T09:30:08.959167884Z"
+    created: "2026-09-05T10:00:49.982493454Z"
     description: A Helm chart to distribute opnsense-operator
-    digest: 5b9443751471d2ed83769321c2f969e43b8de50a72aa2a75633b23304cc5c250
+    digest: 6f3043da05ccdeacf9f9394435c860c64e11458e4cd93afe3b97749a6b61b63f
     keywords:
     - kubernetes
     - operator
@@ -16,4 +16,4 @@ entries:
     urls:
     - https://lucas-stofaleti.github.io/opnsense-operator/opnsense-operator-0.0.1.tgz
     version: 0.0.1
-generated: "2026-09-05T09:30:08.958188872Z"
+generated: "2026-09-05T10:00:49.981518562Z"
