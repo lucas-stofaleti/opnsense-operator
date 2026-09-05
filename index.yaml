@@ -1,0 +1,19 @@
+apiVersion: v1
+entries:
+  opnsense-operator:
+  - annotations:
+      kubebuilder.io/generated-by: kubebuilder
+    apiVersion: v2
+    appVersion: v0.0.1
+    created: "2026-09-05T09:30:08.959167884Z"
+    description: A Helm chart to distribute opnsense-operator
+    digest: 5b9443751471d2ed83769321c2f969e43b8de50a72aa2a75633b23304cc5c250
+    keywords:
+    - kubernetes
+    - operator
+    name: opnsense-operator
+    type: application
+    urls:
+    - https://lucas-stofaleti.github.io/opnsense-operator/opnsense-operator-0.0.1.tgz
+    version: 0.0.1
+generated: "2026-09-05T09:30:08.958188872Z"
