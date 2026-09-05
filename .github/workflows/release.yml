@@ -18,6 +18,13 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Ensure triggered from main
+        run: |
+          if [ "${{ github.ref_name }}" != "main" ]; then
+            echo "This workflow can only be run from the 'main' branch (got '${{ github.ref_name }}')."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - name: Validate version format
@@ -89,7 +96,7 @@ jobs:
           yq e -i ".manager.image.tag = \"${VERSION}\"" charts/chart/values.yaml
 
       - name: Build and push multi-arch image
-        run: make docker-buildx IMG="${IMG}" PLATFORMS=linux/amd64,linux/arm64
+        run: make docker-buildx IMG="${IMG}"
 
       - name: Generate install bundle
         run: make build-installer IMG="${IMG}"
@@ -111,7 +118,7 @@ jobs:
           gh release create "${VERSION}" \
             dist/install.yaml \
             dist/opnsense-operator-${VERSION_NUM}.tgz \
-            --title "Release ${VERSION}" \
+            --title "${VERSION}" \
             --generate-notes
 
   publish-chart:
@@ -148,18 +155,40 @@ jobs:
         run: |
           yq e -i ".manager.image.tag = \"${VERSION}\"" charts/chart/values.yaml
 
-      - name: Package Helm chart
-        run: helm package charts/chart/ -d .cr-release-packages/
-
       - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - uses: helm/chart-releaser-action@v1.7.0
-        with:
-          skip_packaging: true
-          packages_with_index: true
-          charts_repo_url: https://lucas-stofaleti.github.io/opnsense-operator
-        env:
-          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Ensure gh-pages branch exists
+        run: |
+          if ! git ls-remote --exit-code --heads origin gh-pages > /dev/null; then
+            echo "gh-pages branch not found; creating an initial empty branch."
+            git checkout --orphan gh-pages
+            git rm -rf . > /dev/null 2>&1 || true
+            git commit --allow-empty -m "chore: initialize gh-pages branch"
+            git push origin gh-pages
+            git checkout "${GITHUB_REF_NAME}"
+          fi
+
+      - name: Package Helm chart
+        run: helm package charts/chart/ -d .cr-release-packages/
+
+      - name: Publish chart to gh-pages
+        run: |
+          PACKAGE="opnsense-operator-${VERSION_NUM}.tgz"
+          PAGES_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/$(basename "$GITHUB_REPOSITORY")"
+
+          git worktree add /tmp/gh-pages origin/gh-pages
+          cp ".cr-release-packages/${PACKAGE}" "/tmp/gh-pages/${PACKAGE}"
+
+          if [ -f /tmp/gh-pages/index.yaml ]; then
+            helm repo index /tmp/gh-pages --url "${PAGES_URL}" --merge /tmp/gh-pages/index.yaml
+          else
+            helm repo index /tmp/gh-pages --url "${PAGES_URL}"
+          fi
+
+          cd /tmp/gh-pages
+          git add "${PACKAGE}" index.yaml
+          git commit -m "chore: publish ${PACKAGE}"
+          git push origin HEAD:gh-pages
