@@ -164,8 +164,24 @@ jobs:
             git checkout "${GITHUB_REF_NAME}"
           fi
 
-      - uses: helm/chart-releaser-action@v1.7.0
-        with:
-          packages_with_index: true
-        env:
-          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Package Helm chart
+        run: helm package charts/chart/ -d .cr-release-packages/
+
+      - name: Publish chart to gh-pages
+        run: |
+          PACKAGE="opnsense-operator-${VERSION_NUM}.tgz"
+          PAGES_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/$(basename "$GITHUB_REPOSITORY")"
+
+          git worktree add /tmp/gh-pages origin/gh-pages
+          cp ".cr-release-packages/${PACKAGE}" "/tmp/gh-pages/${PACKAGE}"
+
+          if [ -f /tmp/gh-pages/index.yaml ]; then
+            helm repo index /tmp/gh-pages --url "${PAGES_URL}" --merge /tmp/gh-pages/index.yaml
+          else
+            helm repo index /tmp/gh-pages --url "${PAGES_URL}"
+          fi
+
+          cd /tmp/gh-pages
+          git add "${PACKAGE}" index.yaml
+          git commit -m "chore: publish ${PACKAGE}"
+          git push origin HEAD:gh-pages
