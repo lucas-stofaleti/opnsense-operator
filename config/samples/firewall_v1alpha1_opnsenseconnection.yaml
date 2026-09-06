@@ -1,9 +1,6 @@
 apiVersion: firewall.opnsense.io/v1alpha1
 kind: OPNsenseConnection
 metadata:
-  labels:
-    app.kubernetes.io/name: opnsense-operator
-    app.kubernetes.io/managed-by: kustomize
   name: opnsenseconnection-sample
 spec:
   url: https://192.168.56.101
@@ -11,9 +8,10 @@ spec:
     secretRef:
       name: opnsense-api-credentials
       namespace: opnsense-operator-system
-  tls:
-    insecureSkipVerify: true   # dev only — disables TLS certificate verification
+  # tls is optional — standard TLS certificate verification is used when omitted.
   # tls:
-  #   caSecretRef:             # production — custom CA bundle
+  #   caSecretRef:               # custom CA bundle (Secret key "ca.crt")
   #     name: opnsense-ca
   #     namespace: opnsense-operator-system
+  tls:
+    insecureSkipVerify: true   # dev only — disables TLS certificate verification
