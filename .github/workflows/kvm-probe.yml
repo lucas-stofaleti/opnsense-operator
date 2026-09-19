@@ -95,6 +95,8 @@ jobs:
           VERSION=$(curl -sk -u "$OPNSENSE_API_KEY:$OPNSENSE_API_SECRET" \
             "$OPNSENSE_BASE_URL/api/core/firmware/info" \
             | python3 -c 'import sys,json;print(json.load(sys.stdin).get("product",{}).get("product_version"))')
+          # Echo to the log too: $GITHUB_STEP_SUMMARY renders only in the UI.
+          echo "kvm=${KVM_PRESENT} boot=${{ steps.boot.outputs.boot_seconds }}s version=${VERSION} get_total=${GET_TOTAL} post_total=${POST_TOTAL}"
           {
             echo "### OPNsense ${{ matrix.series }} on ubuntu-24.04"
             echo ""

@@ -1,0 +1,125 @@
+name: Compatibility Matrix
+
+# Boots a real OPNsense VM per supported series and runs the integration suite
+# against each. This is the only layer that can catch upstream API drift --
+# unit and replay tests validate our own assumptions, not the firmware.
+#
+# Supported window: latest point release of the three most recent series.
+# See the OPNsense Version Compatibility Plan for why this shape was chosen.
+
+on:
+  workflow_call:
+    inputs:
+      series:
+        description: "JSON array of series to test"
+        required: false
+        default: '["26.7"]'
+        type: string
+  workflow_dispatch:
+    inputs:
+      series:
+        description: "JSON array of series to test"
+        required: false
+        default: '["26.7"]'
+        type: string
+  pull_request:
+    # Scoped: a docs-only change should not boot three VMs. Everything listed
+    # here can plausibly change how we talk to the OPNsense API.
+    paths:
+      - "internal/opnsense/**"
+      - "internal/controller/**"
+      - "hack/opnsense-vm.sh"
+      - "hack/opnsense-vm/**"
+      - ".github/workflows/compat-matrix.yml"
+      - "go.mod"
+      - "go.sum"
+  schedule:
+    # Mondays 06:00 UTC. Catches upstream drift within a week rather than at
+    # release time, which is the worst moment to discover it. Note: scheduled
+    # runs only fire once this file is on the default branch.
+    - cron: "0 6 * * 1"
+
+permissions: {}
+
+jobs:
+  matrix:
+    name: OPNsense ${{ matrix.series }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      # Never stop at the first failure: when a release is blocked you need to
+      # know which series broke, not just the earliest one in the list.
+      fail-fast: false
+      matrix:
+        # 26.1 and 25.7 join once the VM can update to series-latest: their
+        # base images predate behaviour every supported point release has.
+        series: ${{ fromJSON(inputs.series || '["26.7"]') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Runner virtualization support
+        run: |
+          if [ -e /dev/kvm ]; then
+            ls -l /dev/kvm
+            echo "KVM_PRESENT=true" >> "$GITHUB_ENV"
+          else
+            echo "KVM_PRESENT=false" >> "$GITHUB_ENV"
+            echo "::warning::/dev/kvm absent - software emulation will be slow"
+          fi
+
+      - name: Boot OPNsense ${{ matrix.series }}
+        id: boot
+        run: |
+          START=$(date +%s)
+          ./hack/opnsense-vm.sh up "${{ matrix.series }}" > vm-env.sh
+          echo "boot_seconds=$(( $(date +%s) - START ))" >> "$GITHUB_OUTPUT"
+
+      - name: Record the firmware actually tested
+        id: firmware
+        run: |
+          set -a; . ./vm-env.sh; set +a
+          VERSION=$(curl -sk -u "$OPNSENSE_API_KEY:$OPNSENSE_API_SECRET" \
+            "$OPNSENSE_BASE_URL/api/core/firmware/info" \
+            | python3 -c 'import sys,json;print(json.load(sys.stdin).get("product",{}).get("product_version",""))')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Tested against OPNsense ${VERSION}"
+          # Series-latest is a moving target, so the exact version tested has to
+          # be recorded rather than inferred from the series name.
+          if [ -z "${VERSION}" ]; then
+            echo "::error::could not determine firmware version"
+            exit 1
+          fi
+
+      - name: Integration suite
+        run: |
+          set -a; . ./vm-env.sh; set +a
+          go test -tags=integration ./internal/opnsense/ -v 2>&1 | tee itest.log \
+            | grep -E '^(--- PASS|--- FAIL|--- SKIP|ok|FAIL)' || true
+          if grep -qE '^(FAIL|--- FAIL)' itest.log; then
+            echo "::error::integration suite failed against OPNsense ${{ steps.firmware.outputs.version }}"
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "| Series | Firmware | KVM | Boot | Result |"
+            echo "| --- | --- | --- | --- | --- |"
+            echo "| ${{ matrix.series }} | \`${{ steps.firmware.outputs.version }}\` | \`${KVM_PRESENT}\` | ${{ steps.boot.outputs.boot_seconds }}s | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Serial console log on failure
+        if: failure()
+        run: tail -120 ".opnsense-vm/serial-${{ matrix.series }}.log" || true
+
+      - name: Tear down
+        if: always()
+        run: ./hack/opnsense-vm.sh down "${{ matrix.series }}" || true

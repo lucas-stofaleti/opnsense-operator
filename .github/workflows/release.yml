@@ -43,11 +43,20 @@ jobs:
             exit 1
           fi
 
+  # Block the release on a green compatibility matrix: nothing ships without
+  # being exercised against every supported OPNsense series.
+  compat-matrix:
+    name: Compatibility
+    needs: [validate]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/compat-matrix.yml
+
   release:
     name: Release
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    needs: [validate]
+    needs: [validate, compat-matrix]
     permissions:
       contents: write
       packages: write

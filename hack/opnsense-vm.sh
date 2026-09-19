@@ -126,8 +126,8 @@ cmd_up() {
       -accel "$accel" -m 2048 -smp 2 \
       -drive "file=/vm/${overlay},format=qcow2,if=ide" \
       -display none -serial "file:/vm/${serial}" \
-      -netdev "user,id=n0,net=${SLIRP_NET},host=${SLIRP_HOST},hostfwd=tcp:127.0.0.1:${port}-${GUEST_LAN_IP}:443" \
-      -device e1000,netdev=n0 \
+      -netdev "user,id=lan,net=${SLIRP_NET},host=${SLIRP_HOST},hostfwd=tcp:127.0.0.1:${port}-${GUEST_LAN_IP}:443" \
+      -device e1000,netdev=lan \
       >/dev/null
 
   log "waiting for the web GUI (first boot runs the installer scripts)"
@@ -185,6 +185,56 @@ mint_api_key() {
     "$base/api/auth/user/addApiKey/root"
 }
 
+# Bring the VM to the latest point release of its series.
+#
+# This matters: base images are not what anyone runs. OPNsense 26.1.0 returns
+# only floating rules when searchRule is called without an interface parameter,
+# a behaviour changed by 26.1.2 -- testing the base image would mean chasing
+# bugs no supported version has.
+update_to_series_latest() {
+  local port="$1" key="$2" secret="$3"
+  local base="https://127.0.0.1:${port}"
+  local auth=(-sk -u "${key}:${secret}" --max-time 120)
+
+  log "checking for updates"
+  curl "${auth[@]}" -X POST "$base/api/core/firmware/check" >/dev/null || true
+
+  # check runs in the backend; give it a moment to populate status.
+  local waited=0
+  while (( waited < 120 )); do
+    local st
+    st="$(curl "${auth[@]}" "$base/api/core/firmware/status" \
+          | python3 -c 'import sys,json;print(json.load(sys.stdin).get("status",""))' 2>/dev/null || echo "")"
+    [[ "$st" == "update" || "$st" == "upgrade" ]] && break
+    [[ "$st" == "none" ]] && { log "already at series-latest"; return 0; }
+    sleep 5; (( waited += 5 ))
+  done
+
+  log "applying updates"
+  curl "${auth[@]}" -X POST "$base/api/core/firmware/update" >/dev/null || true
+
+  # The update may reboot the VM; poll until the GUI answers again.
+  waited=0
+  local timeout=1200
+  while (( waited < timeout )); do
+    local st
+    st="$(curl "${auth[@]}" "$base/api/core/firmware/upgradestatus" \
+          | python3 -c 'import sys,json;print(json.load(sys.stdin).get("status",""))' 2>/dev/null || echo "unreachable")"
+    case "$st" in
+      done) log "update finished"; break ;;
+      reboot) log "guest is rebooting" ;;
+    esac
+    sleep 10; (( waited += 10 ))
+  done
+
+  log "waiting for the GUI after update"
+  waited=0
+  until curl -sk --max-time 5 -o /dev/null "$base/" 2>/dev/null; do
+    sleep 5; (( waited += 5 ))
+    (( waited > 600 )) && fail "GUI did not return after update"
+  done
+}
+
 cmd_env() {
   local series="$1"
   local port; port="$(host_port "$series")"
@@ -194,6 +244,13 @@ cmd_env() {
   key="$(printf '%s' "$creds" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("key",""))')"
   secret="$(printf '%s' "$creds" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("secret",""))')"
   [[ -n "$key" && -n "$secret" ]] || fail "API key creation failed: $creds"
+
+  # Opt-in until the guest has a default route. The VM currently has only a
+  # static LAN address, so the update mirrors are unreachable. See the plan's
+  # "series-latest" gap.
+  if [[ "${OPNSENSE_UPDATE:-}" == "true" ]]; then
+    update_to_series_latest "$port" "$key" "$secret"
+  fi
 
   cat <<EOF
 export OPNSENSE_BASE_URL=https://127.0.0.1:${port}
