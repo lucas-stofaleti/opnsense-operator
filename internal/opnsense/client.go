@@ -366,15 +366,28 @@ func (c *Client) GetRule(ctx context.Context, uuid string) (FirewallRule, error)
 	}, nil
 }
 
-func (c *Client) SearchRuleByManagedSuffix(ctx context.Context, suffix string) ([]string, error) {
-	body, err := c.doJSON(ctx, http.MethodGet, "/api/firewall/filter/searchRule?searchPhrase="+url.QueryEscape(suffix), nil)
+// SearchRuleByManagedSuffix returns the UUIDs of rules whose description carries
+// the given managed marker.
+//
+// The searchPhrase must be sent in the POST body. OPNsense 26.1.8 refactored
+// searchRuleAction to read it with getPost() only; on 26.1.8 and later a GET
+// query parameter is ignored and every rule on the firewall is returned.
+// POST works across the whole supported window, so no version branching is needed.
+//
+// The server-side filter is a case-insensitive substring match, which is too
+// loose to establish identity: searching "default/rule" also matches
+// "default/rule-2". Rows are therefore re-checked here against the exact marker.
+func (c *Client) SearchRuleByManagedSuffix(ctx context.Context, marker string) ([]string, error) {
+	body, err := c.doJSON(ctx, http.MethodPost, "/api/firewall/filter/searchRule",
+		map[string]string{"searchPhrase": marker})
 	if err != nil {
 		return nil, err
 	}
 
 	var response struct {
 		Rows []struct {
-			UUID string `json:"uuid"`
+			UUID        string `json:"uuid"`
+			Description string `json:"description"`
 		} `json:"rows"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil {
@@ -383,7 +396,9 @@ func (c *Client) SearchRuleByManagedSuffix(ctx context.Context, suffix string) (
 
 	uuids := make([]string, 0, len(response.Rows))
 	for _, row := range response.Rows {
-		uuids = append(uuids, row.UUID)
+		if strings.Contains(row.Description, marker) {
+			uuids = append(uuids, row.UUID)
+		}
 	}
 
 	return uuids, nil

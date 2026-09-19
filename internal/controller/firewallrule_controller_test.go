@@ -409,7 +409,7 @@ var _ = Describe("FirewallRule Controller", func() {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
-				case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
+				case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
 					_, _ = fmt.Fprint(w, searchResponseBody)
 				case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/getRule/"):
 					_, _ = fmt.Fprint(w, getRuleResponseBody)
@@ -474,7 +474,9 @@ var _ = Describe("FirewallRule Controller", func() {
 		// --- Test 6: rule already in sync (no-op path) ---
 		Context("and OPNsense rule is already in sync (no drift)", func() {
 			BeforeEach(func() {
-				searchResponseBody = fmt.Sprintf(`{"rows":[{"uuid":%q}]}`, existingUUID)
+				searchResponseBody = fmt.Sprintf(
+					`{"rows":[{"uuid":%q,"description":"existing [opnsense-operator:default/fwr-main]"}]}`,
+					existingUUID)
 				getRuleResponseBody = buildGetRuleBody("pass", "10")
 				// If UpdateRule is called, we return an error to prove it was NOT called.
 				updateResponseBody = resultErrorBody
@@ -506,7 +508,9 @@ var _ = Describe("FirewallRule Controller", func() {
 		// --- Test 7: rule drifted — update path ---
 		Context("and OPNsense rule has drifted (action changed)", func() {
 			BeforeEach(func() {
-				searchResponseBody = fmt.Sprintf(`{"rows":[{"uuid":%q}]}`, existingUUID)
+				searchResponseBody = fmt.Sprintf(
+					`{"rows":[{"uuid":%q,"description":"existing [opnsense-operator:default/fwr-main]"}]}`,
+					existingUUID)
 				// Existing rule has action=block, but spec says action=pass.
 				getRuleResponseBody = buildGetRuleBody("block", "5")
 				updateResponseBody = resultSavedBody
@@ -522,7 +526,7 @@ var _ = Describe("FirewallRule Controller", func() {
 				server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					switch {
-					case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
+					case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
 						_, _ = fmt.Fprint(w, searchResponseBody)
 					case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/getRule/"):
 						callCount++
@@ -598,7 +602,9 @@ var _ = Describe("FirewallRule Controller", func() {
 		// --- Test 8: search returns N>1 UUIDs ---
 		Context("and OPNsense search returns multiple UUIDs", func() {
 			BeforeEach(func() {
-				searchResponseBody = `{"rows":[{"uuid":"uuid-1"},{"uuid":"uuid-2"}]}`
+				searchResponseBody = `{"rows":[` +
+					`{"uuid":"uuid-1","description":"a [opnsense-operator:default/fwr-main]"},` +
+					`{"uuid":"uuid-2","description":"b [opnsense-operator:default/fwr-main]"}]}`
 			})
 
 			It("sets Ready=False with LookupFailed reason", func() {
@@ -649,7 +655,7 @@ var _ = Describe("FirewallRule Controller", func() {
 							// Second call is post-create read-back.
 							_, _ = fmt.Fprint(w, getRuleResponseBody)
 						}
-					case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
+					case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
 						_, _ = fmt.Fprint(w, searchResponseBody)
 					case r.Method == http.MethodPost && r.URL.Path == addRulePath:
 						_, _ = fmt.Fprint(w, createResponseBody)
@@ -736,7 +742,7 @@ var _ = Describe("FirewallRule Controller", func() {
 				server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					switch {
-					case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
+					case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
 						_, _ = fmt.Fprint(w, searchResponseBody)
 					case r.Method == http.MethodPost && r.URL.Path == addRulePath:
 						_, _ = fmt.Fprint(w, createResponseBody)
@@ -793,7 +799,9 @@ var _ = Describe("FirewallRule Controller", func() {
 		// --- Test 11c: UpdateRule returns ErrFirewallRuleNotFound ---
 		Context("and UpdateRule returns ErrFirewallRuleNotFound", func() {
 			BeforeEach(func() {
-				searchResponseBody = fmt.Sprintf(`{"rows":[{"uuid":%q}]}`, existingUUID)
+				searchResponseBody = fmt.Sprintf(
+					`{"rows":[{"uuid":%q,"description":"existing [opnsense-operator:default/fwr-main]"}]}`,
+					existingUUID)
 				// Existing differs so update is triggered.
 				getRuleResponseBody = buildGetRuleBody("block", "5")
 				// setRule returns {"result":"failed"} with no validations when the UUID does not exist.
@@ -819,7 +827,9 @@ var _ = Describe("FirewallRule Controller", func() {
 		// --- Test 11d: ApplyFirewallRules fails after update ---
 		Context("and ApplyFirewallRules fails after update", func() {
 			BeforeEach(func() {
-				searchResponseBody = fmt.Sprintf(`{"rows":[{"uuid":%q}]}`, existingUUID)
+				searchResponseBody = fmt.Sprintf(
+					`{"rows":[{"uuid":%q,"description":"existing [opnsense-operator:default/fwr-main]"}]}`,
+					existingUUID)
 				getRuleResponseBody = buildGetRuleBody("block", "5")
 				updateResponseBody = resultSavedBody
 				applyResponseBody = statusFailedBody
@@ -853,7 +863,9 @@ var _ = Describe("FirewallRule Controller", func() {
 				Expect(k8sClient.Update(ctx, rule)).To(Succeed())
 
 				// Existing rule in OPNsense has sequence "5", spec wants "100" → update triggered.
-				searchResponseBody = fmt.Sprintf(`{"rows":[{"uuid":%q}]}`, existingUUID)
+				searchResponseBody = fmt.Sprintf(
+					`{"rows":[{"uuid":%q,"description":"existing [opnsense-operator:default/fwr-main]"}]}`,
+					existingUUID)
 				// Same as existing in all fields except sequence is "5" not "100".
 				getRuleResponseBody = buildGetRuleBody("pass", "5")
 				updateResponseBody = resultSavedBody
@@ -867,7 +879,7 @@ var _ = Describe("FirewallRule Controller", func() {
 				server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					switch {
-					case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
+					case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
 						_, _ = fmt.Fprint(w, searchResponseBody)
 					case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/getRule/"):
 						callCount++
@@ -905,7 +917,9 @@ var _ = Describe("FirewallRule Controller", func() {
 		// --- Test 11f: GetFailed after UpdateRule succeeds ---
 		Context("and GetRule fails after UpdateRule and Apply succeed", func() {
 			BeforeEach(func() {
-				searchResponseBody = fmt.Sprintf(`{"rows":[{"uuid":%q}]}`, existingUUID)
+				searchResponseBody = fmt.Sprintf(
+					`{"rows":[{"uuid":%q,"description":"existing [opnsense-operator:default/fwr-main]"}]}`,
+					existingUUID)
 				getRuleResponseBody = buildGetRuleBody("block", "5")
 				updateResponseBody = resultSavedBody
 				applyResponseBody = applyOKBody
@@ -916,7 +930,7 @@ var _ = Describe("FirewallRule Controller", func() {
 				server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					switch {
-					case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
+					case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
 						_, _ = fmt.Fprint(w, searchResponseBody)
 					case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/getRule/"):
 						callCount++
@@ -1037,8 +1051,10 @@ var _ = Describe("FirewallRule Controller", func() {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
-				case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
-					_, _ = fmt.Fprintf(w, `{"rows":[{"uuid":%q}]}`, matchUUID)
+				case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/searchRule"):
+					_, _ = fmt.Fprintf(w,
+						`{"rows":[{"uuid":%q,"description":"x [opnsense-operator:default/fwr-getrule-fail]"}]}`,
+						matchUUID)
 				case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/firewall/filter/getRule/"):
 					// Return an unexpected response shape to trigger ErrUnexpectedResponse.
 					_, _ = fmt.Fprint(w, `{"rule":{"action":null,"direction":null}}`)

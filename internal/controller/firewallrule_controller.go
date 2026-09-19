@@ -209,8 +209,8 @@ func (r *FirewallRuleReconciler) resolveExternalRule(
 		log.Info("Stale UUID in status, falling back to suffix search", "uuid", rule.Status.UUID)
 	}
 
-	suffix := rule.Namespace + "/" + rule.Name
-	uuids, err := c.SearchRuleByManagedSuffix(ctx, suffix)
+	marker := managedMarker(rule.Namespace, rule.Name)
+	uuids, err := c.SearchRuleByManagedSuffix(ctx, marker)
 	if err != nil {
 		return "", nil, err
 	}
@@ -226,8 +226,8 @@ func (r *FirewallRuleReconciler) resolveExternalRule(
 		return uuids[0], &existing, nil
 	default:
 		return "", nil, fmt.Errorf(
-			"found %d rules matching managed suffix %q, expected at most 1",
-			len(uuids), suffix)
+			"found %d rules matching managed marker %q, expected at most 1",
+			len(uuids), marker)
 	}
 }
 
@@ -310,11 +310,17 @@ func (r *FirewallRuleReconciler) setReadyCondition(ctx context.Context, rule *fi
 	return nil
 }
 
+// managedMarker is the token appended to a rule's description so the controller
+// can find the rule again. It is the single source of truth for that format:
+// both the write path and the lookup path must agree on it exactly.
+func managedMarker(namespace, name string) string {
+	return "[opnsense-operator:" + namespace + "/" + name + "]"
+}
+
 // specToRule converts a FirewallRuleSpec to an opnsense.FirewallRule, appending the
 // managed suffix to the description so the controller can identify the rule later.
 func specToRule(spec firewallv1alpha1.FirewallRuleSpec, namespace, name string) opnsense.FirewallRule {
-	suffix := "[opnsense-operator:" + namespace + "/" + name + "]"
-	description := strings.TrimSpace(spec.Description + " " + suffix)
+	description := strings.TrimSpace(spec.Description + " " + managedMarker(namespace, name))
 
 	sequence := ""
 	if spec.Sequence != nil {

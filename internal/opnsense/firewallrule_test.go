@@ -401,19 +401,29 @@ func TestGetRuleTransportError(t *testing.T) {
 func TestSearchRuleByManagedSuffixFound(t *testing.T) {
 	t.Parallel()
 
-	// Verified with:
-	//   hack/opnsense-curl.sh '/api/firewall/filter/searchRule?searchPhrase=default/allow-https'
+	// Verified against a live OPNsense 26.7 with:
+	//   curl -X POST -d '{"searchPhrase":"[opnsense-operator:default/allow-https]"}' \
+	//     /api/firewall/filter/searchRule
 	// Real response:
 	//   {"total":1,"rowCount":1,"current":1,"rows":[{"uuid":"eb3c7d1b-4348-4b93-8a94-1efabf9225d2","enabled":"1","sequence":"2500","action":"pass","interface":"","direction":"in","ipprotocol":"inet","protocol":"any","source_net":"any","source_not":"0","source_port":"","destination_net":"any","destination_not":"0","destination_port":"","quick":"1","log":"0","description":"Allow HTTPS [opnsense-operator:default/allow-https]"}]}
+	const marker = "[opnsense-operator:default/allow-https]"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Fatalf("expected GET request, got %s", r.Method)
+		// The phrase must travel in the POST body: OPNsense 26.1.8+ ignores it
+		// as a query parameter and returns every rule on the firewall.
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST request, got %s", r.Method)
 		}
 		if r.URL.Path != "/api/firewall/filter/searchRule" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		if got := r.URL.Query().Get("searchPhrase"); got != "default/allow-https" {
-			t.Fatalf("expected searchPhrase=%q, got %q", "default/allow-https", got)
+		var payload struct {
+			SearchPhrase string `json:"searchPhrase"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if payload.SearchPhrase != marker {
+			t.Fatalf("expected searchPhrase=%q, got %q", marker, payload.SearchPhrase)
 		}
 
 		writeJSON(t, w, http.StatusOK, map[string]any{
@@ -432,7 +442,7 @@ func TestSearchRuleByManagedSuffixFound(t *testing.T) {
 
 	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
 
-	uuids, err := client.SearchRuleByManagedSuffix(context.Background(), "default/allow-https")
+	uuids, err := client.SearchRuleByManagedSuffix(context.Background(), marker)
 	if err != nil {
 		t.Fatalf("SearchRuleByManagedSuffix returned error: %v", err)
 	}
@@ -476,6 +486,7 @@ func TestSearchRuleByManagedSuffixNotFound(t *testing.T) {
 func TestSearchRuleByManagedSuffixMultiple(t *testing.T) {
 	t.Parallel()
 
+	const marker = "[opnsense-operator:default/allow-https]"
 	// OPNsense uses a substring match, so multiple rules can share the same suffix.
 	// The caller is responsible for handling the ambiguous N>1 case.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -493,7 +504,7 @@ func TestSearchRuleByManagedSuffixMultiple(t *testing.T) {
 
 	client := NewClient(server.URL, testAPIKey, testAPISecret, server.Client())
 
-	uuids, err := client.SearchRuleByManagedSuffix(context.Background(), "default/allow-https")
+	uuids, err := client.SearchRuleByManagedSuffix(context.Background(), marker)
 	if err != nil {
 		t.Fatalf("SearchRuleByManagedSuffix returned error: %v", err)
 	}

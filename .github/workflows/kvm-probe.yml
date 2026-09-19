@@ -1,0 +1,116 @@
+name: OPNsense VM Probe
+
+# Phase 0a + 0b verification on a real GitHub-hosted runner.
+#
+# Two questions this answers:
+#   1. Is /dev/kvm usable on a hosted runner? (officially unsupported)
+#   2. Does hack/opnsense-vm.sh boot a real OPNsense and pass the suite there?
+#
+# Triggered by pushing the probe branch, because workflow_dispatch only lists
+# workflows that already exist on the default branch.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "ci/opnsense-vm**"
+
+permissions: {}
+
+jobs:
+  probe:
+    name: Boot OPNsense ${{ matrix.series }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        series: ["26.7"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Runner capabilities
+        run: |
+          echo "::group::virtualization"
+          grep -m1 'model name' /proc/cpuinfo || true
+          grep -o 'vmx\|svm' /proc/cpuinfo | sort -u || echo "no virt flags in cpuinfo"
+          if [ -e /dev/kvm ]; then ls -l /dev/kvm; else echo "/dev/kvm ABSENT"; fi
+          echo "::endgroup::"
+          echo "::group::resources"
+          df -h / | tail -1
+          free -g | head -2
+          echo "::endgroup::"
+
+      - name: Make /dev/kvm usable
+        run: |
+          # Hosted runners expose the device but not always with usable perms.
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+              | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+            ls -l /dev/kvm
+            echo "KVM_PRESENT=true" >> "$GITHUB_ENV"
+          else
+            echo "KVM_PRESENT=false" >> "$GITHUB_ENV"
+            echo "::warning::/dev/kvm absent - falling back to software emulation, expect a slow boot"
+          fi
+
+      - name: Boot the VM
+        id: boot
+        run: |
+          START=$(date +%s)
+          ./hack/opnsense-vm.sh up "${{ matrix.series }}" > vm-env.sh
+          echo "boot_seconds=$(( $(date +%s) - START ))" >> "$GITHUB_OUTPUT"
+          # Credentials are ephemeral (VM is destroyed with the runner), but
+          # keep them out of the log regardless.
+          sed -E "s/(API_KEY|API_SECRET)='[^']*'/\1='***'/" vm-env.sh
+
+      - name: Run the integration suite
+        run: |
+          set -a; . ./vm-env.sh; set +a
+          go test -tags=integration ./internal/opnsense/ -v 2>&1 | tee itest.log | \
+            grep -E '^(--- PASS|--- FAIL|--- SKIP|ok|FAIL)' || true
+          # Fail the job on any test failure, not just the grep above.
+          grep -qE '^(FAIL|--- FAIL)' itest.log && exit 1 || exit 0
+
+      - name: Confirm the searchRule fix against this firmware
+        if: always()
+        run: |
+          set -a; . ./vm-env.sh; set +a
+          GET_TOTAL=$(curl -sk -u "$OPNSENSE_API_KEY:$OPNSENSE_API_SECRET" \
+            --get --data-urlencode "searchPhrase=zzz-no-such-rule-zzz" \
+            "$OPNSENSE_BASE_URL/api/firewall/filter/searchRule" \
+            | python3 -c 'import sys,json;print(json.load(sys.stdin).get("total"))')
+          POST_TOTAL=$(curl -sk -u "$OPNSENSE_API_KEY:$OPNSENSE_API_SECRET" \
+            -X POST -H 'Content-Type: application/json' \
+            -d '{"searchPhrase":"zzz-no-such-rule-zzz"}' \
+            "$OPNSENSE_BASE_URL/api/firewall/filter/searchRule" \
+            | python3 -c 'import sys,json;print(json.load(sys.stdin).get("total"))')
+          VERSION=$(curl -sk -u "$OPNSENSE_API_KEY:$OPNSENSE_API_SECRET" \
+            "$OPNSENSE_BASE_URL/api/core/firmware/info" \
+            | python3 -c 'import sys,json;print(json.load(sys.stdin).get("product",{}).get("product_version"))')
+          {
+            echo "### OPNsense ${{ matrix.series }} on ubuntu-24.04"
+            echo ""
+            echo "| Check | Value |"
+            echo "| --- | --- |"
+            echo "| /dev/kvm present | \`${KVM_PRESENT}\` |"
+            echo "| Boot to reachable GUI | ${{ steps.boot.outputs.boot_seconds }}s |"
+            echo "| Detected firmware | \`${VERSION}\` |"
+            echo "| GET searchPhrase (unfiltered = bug) | ${GET_TOTAL} |"
+            echo "| POST searchPhrase (filtered = fix) | ${POST_TOTAL} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Serial console log on failure
+        if: failure()
+        run: tail -100 ".opnsense-vm/serial-${{ matrix.series }}.log" || true
+
+      - name: Tear down
+        if: always()
+        run: ./hack/opnsense-vm.sh down "${{ matrix.series }}" || true

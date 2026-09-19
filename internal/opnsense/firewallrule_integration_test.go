@@ -223,20 +223,12 @@ func TestSearchRuleByManagedSuffixIntegration(t *testing.T) {
 		}
 	}()
 
-	uuids, err := client.SearchRuleByManagedSuffix(ctx, "default/ci-search-test")
+	uuids, err := client.SearchRuleByManagedSuffix(ctx, "[opnsense-operator:default/ci-search-test]")
 	if err != nil {
 		t.Fatalf("SearchRuleByManagedSuffix returned error: %v", err)
 	}
-
-	found := false
-	for _, u := range uuids {
-		if u == uuid {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected UUID %q in search results %v", uuid, uuids)
+	if len(uuids) != 1 || uuids[0] != uuid {
+		t.Fatalf("expected exactly [%s], got %v", uuid, uuids)
 	}
 
 	if err := client.DeleteRule(ctx, uuid); err != nil {
@@ -435,19 +427,12 @@ func TestApplyFirewallRulesIntegration(t *testing.T) {
 	}
 
 	// Rule should be visible via search after apply.
-	uuids, err := client.SearchRuleByManagedSuffix(ctx, "default/ci-apply-test")
+	uuids, err := client.SearchRuleByManagedSuffix(ctx, "[opnsense-operator:default/ci-apply-test]")
 	if err != nil {
 		t.Fatalf("SearchRuleByManagedSuffix returned error: %v", err)
 	}
-	found := false
-	for _, u := range uuids {
-		if u == uuid {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected UUID %q in search results %v after apply", uuid, uuids)
+	if len(uuids) != 1 || uuids[0] != uuid {
+		t.Fatalf("expected exactly [%s] after apply, got %v", uuid, uuids)
 	}
 
 	if err := client.DeleteRule(ctx, uuid); err != nil {
@@ -471,7 +456,8 @@ func TestFirewallRuleLifecycleIntegration(t *testing.T) {
 
 	ts := time.Now().UTC().Format("150405")
 	suffix := "default/lifecycle-" + ts
-	managedDescription := "lifecycle-" + ts + " [opnsense-operator:" + suffix + "]"
+	marker := "[opnsense-operator:" + suffix + "]"
+	managedDescription := "lifecycle-" + ts + " " + marker
 
 	initial := FirewallRule{
 		Enabled:         true,
@@ -520,19 +506,12 @@ func TestFirewallRuleLifecycleIntegration(t *testing.T) {
 	}
 
 	// Step 3: Search by suffix → assert the created UUID is found.
-	uuids, err := client.SearchRuleByManagedSuffix(ctx, suffix)
+	uuids, err := client.SearchRuleByManagedSuffix(ctx, marker)
 	if err != nil {
 		t.Fatalf("SearchRuleByManagedSuffix returned error: %v", err)
 	}
-	found := false
-	for _, u := range uuids {
-		if u == uuid {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected UUID %q in SearchRuleByManagedSuffix results %v", uuid, uuids)
+	if len(uuids) != 1 || uuids[0] != uuid {
+		t.Fatalf("expected exactly [%s], got %v", uuid, uuids)
 	}
 
 	// Step 4: GetRule → assert all fields match what was sent.
@@ -619,7 +598,7 @@ func TestFirewallRuleLifecycleIntegration(t *testing.T) {
 	}
 
 	// Step 11: SearchRuleByManagedSuffix → assert empty result.
-	uuids, err = client.SearchRuleByManagedSuffix(ctx, suffix)
+	uuids, err = client.SearchRuleByManagedSuffix(ctx, marker)
 	if err != nil {
 		t.Fatalf("SearchRuleByManagedSuffix after delete returned error: %v", err)
 	}
